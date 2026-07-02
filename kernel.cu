@@ -24,6 +24,7 @@ __global__ void kernel(
 {
     cg::thread_block cta1024 = cg::this_thread_block();
     cg::thread_block_tile<128, thread_block> cta128x8 = cg::tiled_partition<128>(cta1024);
+    cg::coalesced_group rr32x32 = cg::labeled_partition(cta1024, ((cta1024.thread_rank() ^ 32) & 31));
 
 	uint32_t rmem[48]; //16 32-bit for indexing
 	__shared__ uchar smem[32728]; //32768B : 98304B
@@ -46,96 +47,23 @@ __global__ void kernel(
 
     __syncthreads();
 
-	for (int kt = 0; kt < (H >> 9); kt += 4) {
+	for (int kt = 0; kt < (H >> 8); kt += 2) {
 
-		//Ix128x4 panel prefetch
-		//every 8 warps does Ix128 
-		
-
-		if (!(threadIdx.x >> 7) && !((threadIdx.x ^ 32) & 31)) {
-			asm volatile(
-                 	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], %1;\n\t" //2048*8=16384
+        if (rr32x32.meta_group_rank() < 2) {
+            asm volatile(            
+                     	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 4096;\n\t"
                         "cp.async.bulk.commit_group;\n\t"
-			            "cp.async.bulk.wait_group 0;\n\t"
                         ::"l"(
                                 (uint64_t)__cvta_generic_to_global(
                                 W13
                                 + (int64_t)(blockIdx.x * (H >> 7) * (I << 4))
-                                + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 4))
+                                + (int64_t)((kt + rr32x32.meta_group_rank()) * (I << 4))
+                                + (rr32x32.thread_rank() << 10)
                             )
                         ),
-			"n"((uint32_t)(I << 2))
-			);
-		}
-
-        if ((threadIdx.x >> 7) < 2) {
-            __syncthreads();
-        }
-
-         if (((threadIdx.x >> 7)==1) && !((threadIdx.x ^ 32) & 31)) {
-                        asm volatile(
-                            "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], %3, [%2];\n\t"
-                            :
-                            :"r"(smem + ),//@TODO add indexing
-                             "l"(
-                                (uint64_t)__cvta_generic_to_global(
-                                W13
-                                + (int64_t)(blockIdx.x * (H >> 7) * (I << 4))
-                                + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 4))
-                            ),
-                            "r"(mbar),
-                            "n"((uint32_t)(I << 2))
-                            : "memory"
-                );
-        }
-        
-
-		if (((threadIdx.x >> 7)==2) && !((threadIdx.x ^ 32) & 31)) {
-                        asm volatile(
-                        "cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], %1;\n\t" //2048*8=16384
-                        "cp.async.bulk.commit_group;\n\t"
-			            "cp.async.bulk.wait_group 0;\n\t"
-                        ::"l"(
-                                (uint64_t)__cvta_generic_to_global(
-                                M13
-                                + (int64_t)(blockIdx.x * (H >> 7) * (I << 2))
-                                + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 2))
-                            )
-                        ),
-                        "n"((uint32_t)(I << 1))
+			"n"((uint32_t)(I << 2)) //@TODO add condition based bytes calc (for tail of each panel)
 			);
         }
-
-       
-
-
-		if (((threadIdx.x >> 7)==4) && !((threadIdx.x ^ 32) & 31)) {
-                        asm volatile(
-                        "cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], %1;\n\t" //2048*8=16384
-                        "cp.async.bulk.commit_group;\n\t"
-                        "cp.async.bulk.wait_group 0;\n\t"
-                        ::"l"(
-                                (uint64_t)__cvta_generic_to_global(
-                                S13
-                                + (int64_t)(blockIdx.x * (H >> 7) * (I << 1))
-                                + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 1))
-                            )
-                        ),
-                        "n"((uint32_t)(I >> 1))
-			);
-        }
-
-        if (!kt) {
-            __syncthreads();
-        }
-		
-		//L2->L1
-		//L1->smem
-		
-		//load activations 8x128x4		
-
-
-	}
 
 
 	
