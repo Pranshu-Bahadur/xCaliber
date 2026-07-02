@@ -1,3 +1,7 @@
+#include <cooperative_groups.h>
+
+using namespace cg = cooperative_groups;
+
 //CTA=1024 (1 CTA = 1 SM = 1 cluster)
 //@TODO profile vs 2SM / cluster (W1, W3 variant)
 __global__ void kernel(
@@ -18,6 +22,9 @@ __global__ void kernel(
                 const int32_t TOPK
 )
 {
+    cg::thread_block cta1024 = cg::this_thread_block();
+    cg::thread_block_tile<128, thread_block> cta128x8 = cg::tiled_partition<128>(cta1024);
+
 	uint32_t rmem[48]; //16 32-bit for indexing
 	__shared__ uchar smem[32728]; //32768B : 98304B
     __shared__ alignas(16) uint64_t mbar[5];
@@ -57,7 +64,7 @@ __global__ void kernel(
                                 + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 4))
                             )
                         ),
-			"n"((uint32_t)(I << 2)) //I based OOB @TODO make const
+			"n"((uint32_t)(I << 2))
 			);
 		}
 
@@ -95,7 +102,7 @@ __global__ void kernel(
                                 + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 2))
                             )
                         ),
-                        "n"((uint32_t)(I << 1)) //I based OOB @TODO make const
+                        "n"((uint32_t)(I << 1))
 			);
         }
 
@@ -114,7 +121,7 @@ __global__ void kernel(
                                 + (int64_t)((kt + (threadIdx.x >> 5)) * (I << 1))
                             )
                         ),
-                        "n"((uint32_t)(I >> 1)) //I based OOB @TODO make const
+                        "n"((uint32_t)(I >> 1))
 			);
         }
 
