@@ -15,7 +15,6 @@ Do not drift back to the old CTA256 / I64 split board except as lineage.
 
 ## Current Lock
 
-- [x] Live repo is `xCaliber`, not `xCalibur`.
 - [x] `kernel.cu` is the source board.
 - [x] `TODO.md` is a blackboard, not compile proof.
 - [x] CTA1024 is current.

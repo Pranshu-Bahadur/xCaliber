@@ -38,7 +38,7 @@ __global__ void kernel(
 
 	if (!(threadIdx.x & 31) && ((threadIdx.x >> 5) < 5)) {
 		asm volatile(
-			"mbarrier.init.layout::v0.shared::cta.b64 [%0], 32;\n\t"
+			"mbarrier.init.layout::v0.shared::cta.b64 [%0], 512;\n\t"
 			:
 			: "r"((uint32_t)__cvta_generic_to_shared(mbar + (threadIdx.x >> 5)))
 			: "memory"
@@ -57,7 +57,7 @@ __global__ void kernel(
                                 (uint64_t)__cvta_generic_to_global(
                                 W13
                                 + (int64_t)(blockIdx.x * (H >> 7) * (I << 4))
-                                + (int64_t)((kt + rr32x32.meta_group_rank()) * (I << 4))
+                                + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1))) * (I << 4))
                                 + (rr32x32.thread_rank() << 10)
                             )
                         ),
@@ -108,10 +108,16 @@ __global__ void kernel(
                 }
 
                 if (
-                        (rr32x32.meta_group_rank() == (2 + k)))
+                       (rr32x32.meta_group_rank() == (2 + k))) || (rr32x32.meta_group_rank() == (4 + k + 1)))
                    ) 
                 {
                     rr32x32.sync();
+                }
+
+                if (
+                        (rr32x32.meta_group_rank() == (4 + k + 1)))
+                   ) 
+                {
 
                     asm volatile(
                                 "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 32, [%2];\n\t"
@@ -119,7 +125,7 @@ __global__ void kernel(
                                 :
                                 "r"(
                                     (uint32_t)__cvta_generic_to_shared(
-                                        smem + (rr32x32.thread_rank() << 6)
+                                        smem + (((rr32x32.meta_group_rank() ^ 2) & 1) * (rr32x32.thread_rank() << 6))
                                     )
                                 )
                                 :
@@ -130,8 +136,97 @@ __global__ void kernel(
                                         + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1)) * (I << 1))
                                         + (rr32x32.thread_rank() << 4)
                                     )
-                                )
+                                ),
+                                "r"((uint32_t)__cvta_generic_to_shared(mbar + 1))
                         );
+                }
+
+                for (rrip = 0; rrip < 4; rrip++) {
+                    if (
+                        (rr32x32.meta_group_rank() == (2 + k))
+                        && (((rri << 2) + rrip) == rr32x32.thread_rank())
+                    ) 
+                    {
+                        asm volatile(
+                            "cp.async.bulk.wait_group 0;\n\t"
+                        );
+                    }
+                }
+
+                if (
+                       (rr32x32.meta_group_rank() == (2 + k))) || (rr32x32.meta_group_rank() == (4 + k)) || (rr32x32.meta_group_rank() == (4 + k + 2))
+                   ) 
+                {
+                    rr32x32.sync();
+                }
+
+                if (
+                        (rr32x32.meta_group_rank() == (4 + k)) || (rr32x32.meta_group_rank() == (4 + k + 2))
+                   )
+                {
+
+                    asm volatile(
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 32, [%2];\n\t"
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0 + 32], [%1 + 1024], 32, [%2];\n\t"
+                                :
+                                "r"(
+                                    (uint32_t)__cvta_generic_to_shared(
+                                        smem + (4096) + (((rr32x32.meta_group_rank() ^ 2) & 1) * (rr32x32.meta_group_rank() / 6) * (rr32x32.thread_rank() << 6))
+                                    )
+                                )
+                                :
+                                "l"(
+                                        (uint64_t)__cvta_generic_to_global(
+                                        M13
+                                        + (int64_t)(blockIdx.x * (H >> 7) * (I << 2))
+                                        + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1)) * (I << 2))
+                                        + ((rr32x32.meta_group_rank() / 6) * (rr32x32.thread_rank() << 4))
+                                    )
+                                ),
+                                "r"((uint32_t)__cvta_generic_to_shared(mbar + 2))
+                        );
+                }
+
+                for (rrip = 0; rrip < 4; rrip++) {
+                    if (
+                        (rr32x32.meta_group_rank() == k)
+                        && (((rri << 2) + rrip) == rr32x32.thread_rank())
+                    ) 
+                    {
+                        asm volatile(
+                            "cp.async.bulk.wait_group 0;\n\t"
+                        );
+                    }
+                }
+
+                if (rr32x32.meta_group_rank() == k || (rr32x32.meta_group_rank() >= 16)) {
+
+                    rr32x32.sync();
+
+                }
+
+                if ((rr32x32.meta_group_rank() >= 16)) {
+
+                    asm volatile(
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 32, [%2];\n\t"
+                                :
+                                "r"(
+                                    (uint32_t)__cvta_generic_to_shared(
+                                        smem + (4096) + (((rr32x32.meta_group_rank() ^ 2) & 1) * ((rr32x32.meta_group_rank() ^ 16) & 15) * (rr32x32.thread_rank() << 5))
+                                    )
+                                )
+                                :
+                                "l"(
+                                        (uint64_t)__cvta_generic_to_global(
+                                        W13
+                                        + (int64_t)(blockIdx.x * (H >> 7) * (I << 4))
+                                        + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1)) * (I << 4))
+                                        + (((rr32x32.meta_group_rank() ^ 16) & 15) * (rr32x32.thread_rank() << 4))
+                                    )
+                                ),
+                                "r"((uint32_t)__cvta_generic_to_shared(mbar))
+                        );
+
                 }
             }
         }
