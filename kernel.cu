@@ -212,7 +212,7 @@ __global__ void kernel(
                                 :
                                 "r"(
                                     (uint32_t)__cvta_generic_to_shared(
-                                        smem + (4096) + (((rr32x32.meta_group_rank() ^ 2) & 1) * ((rr32x32.meta_group_rank() ^ 16) & 15) * (rr32x32.thread_rank() << 5))
+                                        smem + (12288) + (((rr32x32.meta_group_rank() ^ 2) & 1) * ((rr32x32.meta_group_rank() ^ 16) & 15) * (rr32x32.thread_rank() << 5))
                                     )
                                 )
                                 :
