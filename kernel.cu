@@ -27,7 +27,7 @@ __global__ void kernel(
     cg::coalesced_group rr32x32 = cg::labeled_partition(cta1024, ((cta1024.thread_rank() ^ 32) & 31));
 
 	uint32_t rmem[48]; //16 32-bit for indexing
-	__shared__ uchar smem[32728]; //32768B : 98304B
+	__shared__ alignas(16) uchar smem[32728]; //32768B : 98304B
     __shared__ alignas(16) uint64_t mbar[5];
 
     if (!((threadIdx.x ^ 4) & 3)){
@@ -38,7 +38,7 @@ __global__ void kernel(
 
 	if (!(threadIdx.x & 31) && ((threadIdx.x >> 5) < 5)) {
 		asm volatile(
-			"mbarrier.init.layout::v0.shared::cta.b64 [%0], 4;\n\t"
+			"mbarrier.init.layout::v0.shared::cta.b64 [%0], 32;\n\t"
 			:
 			: "r"((uint32_t)__cvta_generic_to_shared(mbar + (threadIdx.x >> 5)))
 			: "memory"
@@ -61,15 +61,18 @@ __global__ void kernel(
                                 + (rr32x32.thread_rank() << 10)
                             )
                         ),
-			"n"((uint32_t)(I << 2)) //@TODO add condition based bytes calc (for tail of each panel)
+			            "n"((uint32_t)(I << 2)) //@TODO add condition based bytes calc (for tail of each panel)
 			);
         }
 
         if ((rr32x32.meta_group_rank() >= 2) && (rr32x32.meta_group_rank() < 4)) {
-            asm volatile(            
+            asm volatile(
                      	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 1024;\n\t"
                         "cp.async.bulk.commit_group;\n\t"
-                        ::"l"(
+                        "cp.async.bulk.prefetch.L2.global.L2::evict_last [%1], 512;\n\t"
+                        "cp.async.bulk.commit_group;\n\t"
+                        ::
+                        "l"(
                                 (uint64_t)__cvta_generic_to_global(
                                 M13
                                 + (int64_t)(blockIdx.x * (H >> 7) * (I << 2))
@@ -77,15 +80,7 @@ __global__ void kernel(
                                 + (rr32x32.thread_rank() << 8)
                             )
                         ),
-			"n"((uint32_t)(I)) //@TODO add condition based bytes calc (for tail of each panel)
-			);
-        }
-
-        if ((rr32x32.meta_group_rank() >= 4) && (rr32x32.meta_group_rank() < 6)) {
-            asm volatile(            
-                     	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 512;\n\t"
-                        "cp.async.bulk.commit_group;\n\t"
-                        ::"l"(
+                        "l"(
                                 (uint64_t)__cvta_generic_to_global(
                                 S13
                                 + (int64_t)(blockIdx.x * (H >> 7) * (I << 1))
@@ -93,7 +88,51 @@ __global__ void kernel(
                                 + (rr32x32.thread_rank() << 7)
                             )
                         ),
-			"n"((uint32_t)(I)) //@TODO add condition based bytes calc (for tail of each panel)
+                        "n"((uint32_t)(I)) //@TODO add condition based bytes calc (for tail of each panel)
+                        "n"((uint32_t)(I >> 1))
 			);
         }
+
+        for (int k = 0; k < 1; k+=1) {
+            for (int rri = 0; rri < 8; rri+=4) {
+                for (rrip = 0; rrip < 4; rrip++) {
+                    if (
+                        (rr32x32.meta_group_rank() == (2 + k))
+                        && (((rri << 2) + rrip) == rr32x32.thread_rank())
+                    ) 
+                    {
+                        asm volatile(
+                            "cp.async.bulk.wait_group 1;\n\t"
+                        );
+                    }
+                }
+
+                if (
+                        (rr32x32.meta_group_rank() == (2 + k)))
+                   ) 
+                {
+                    rr32x32.sync();
+
+                    asm volatile(
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 64, [%2];\n\t"
+                                :
+                                "r"(
+                                    (uint32_t)__cvta_generic_to_shared(
+                                        smem + (rr32x32.thread_rank() << 6)
+                                    )
+                                )
+                                :
+                                "l"(
+                                        (uint64_t)__cvta_generic_to_global(
+                                        S13
+                                        + (int64_t)(blockIdx.x * (H >> 7) * (I << 1))
+                                        + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1)) * (I << 1))
+                                        + (rr32x32.thread_rank() << 4)
+                                    )
+                                )
+                        );
+                }
+            }
+        }
+    }
 }
