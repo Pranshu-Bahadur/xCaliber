@@ -65,7 +65,7 @@ __global__ void kernel(
 			);
         }
 
-        if ((rr32x32.meta_group_rank() > 2) && (rr32x32.meta_group_rank() < 4)) {
+        if ((rr32x32.meta_group_rank() >= 2) && (rr32x32.meta_group_rank() < 4)) {
             asm volatile(            
                      	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 1024;\n\t"
                         "cp.async.bulk.commit_group;\n\t"
@@ -81,7 +81,7 @@ __global__ void kernel(
 			);
         }
 
-         if ((rr32x32.meta_group_rank() > 4) && (rr32x32.meta_group_rank() < 6)) {
+        if ((rr32x32.meta_group_rank() >= 4) && (rr32x32.meta_group_rank() < 6)) {
             asm volatile(            
                      	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 512;\n\t"
                         "cp.async.bulk.commit_group;\n\t"
@@ -96,8 +96,4 @@ __global__ void kernel(
 			"n"((uint32_t)(I)) //@TODO add condition based bytes calc (for tail of each panel)
 			);
         }
-
-
-	
-
 }
