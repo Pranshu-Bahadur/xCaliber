@@ -93,8 +93,9 @@ __global__ void kernel(
 			);
         }
 
-        for (int k = 0; k < 1; k+=1) {
-            for (int rri = 0; rri < 8; rri+=4) {
+        for (int rri = 0; rri < 8; rri+=4) {
+            for (int k = 0; k < 2; k+=1) {
+
                 for (rrip = 0; rrip < 4; rrip++) {
                     if (
                         (rr32x32.meta_group_rank() == (2 + k))
