@@ -114,7 +114,8 @@ __global__ void kernel(
                     rr32x32.sync();
 
                     asm volatile(
-                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 64, [%2];\n\t"
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0], [%1], 32, [%2];\n\t"
+                                "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes.L2::evict_first [%0 + 32], [%1 + 1024], 32, [%2];\n\t"
                                 :
                                 "r"(
                                     (uint32_t)__cvta_generic_to_shared(

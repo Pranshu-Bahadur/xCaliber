@@ -1,0 +1,185 @@
+kernel.cu bank-conflict map
+===========================
+
+Assumptions for this map:
+  rr32x32 = labeled_partition(cta1024, (thread_rank ^ 32) & 31)
+          = labeled by lane id, because (^32) is masked out by &31.
+
+  rr32x32.meta_group_rank() = lane label 0..31.
+  rr32x32.thread_rank()     = rank inside that label group, effectively warp id 0..31.
+
+  Shared-memory bank rule:
+    bank = (smem_byte >> 2) & 31
+    32 banks, 4B per bank word.
+
+
+Current bank-relevant shared write
+----------------------------------
+
+Current destination:
+
+  dst = smem + (rr32x32.thread_rank() << 6)
+      = smem + rank * 64B
+
+Current size:
+
+  cp.async.bulk.shared::cta.global... size = 64B
+
+Thus each rank writes 16 x u32 words:
+
+  rank r base byte = r * 64
+  base bank        = ((r * 64) >> 2) & 31
+                   = (16 * r) & 31
+
+Therefore:
+
+  even rank -> base bank 00
+  odd rank  -> base bank 16
+
+
+Rank -> bank-span table
+-----------------------
+
+  rank  base byte  base bank  banks touched by 64B row
+  ----  ---------  ---------  -------------------------
+  00    0000       00         00..15
+  01    0064       16         16..31
+  02    0128       00         00..15
+  03    0192       16         16..31
+  04    0256       00         00..15
+  05    0320       16         16..31
+  06    0384       00         00..15
+  07    0448       16         16..31
+  08    0512       00         00..15
+  09    0576       16         16..31
+  10    0640       00         00..15
+  11    0704       16         16..31
+  12    0768       00         00..15
+  13    0832       16         16..31
+  14    0896       00         00..15
+  15    0960       16         16..31
+  16    1024       00         00..15
+  17    1088       16         16..31
+  18    1152       00         00..15
+  19    1216       16         16..31
+  20    1280       00         00..15
+  21    1344       16         16..31
+  22    1408       00         00..15
+  23    1472       16         16..31
+  24    1536       00         00..15
+  25    1600       16         16..31
+  26    1664       00         00..15
+  27    1728       16         16..31
+  28    1792       00         00..15
+  29    1856       16         16..31
+  30    1920       00         00..15
+  31    1984       16         16..31
+
+
+Component-wise conflict view
+----------------------------
+
+For word component j inside the 64B row:
+
+  word byte = rank*64 + j*4
+  bank      = (16*rank + j) & 31
+
+For j = 0:
+
+  even ranks 00,02,04,...,30 -> bank 00  => 16-way
+  odd  ranks 01,03,05,...,31 -> bank 16  => 16-way
+
+For j = 1:
+
+  even ranks -> bank 01 => 16-way
+  odd  ranks -> bank 17 => 16-way
+
+...
+
+For j = 15:
+
+  even ranks -> bank 15 => 16-way
+  odd  ranks -> bank 31 => 16-way
+
+
+Verdict
+-------
+
+Not bank-clean for a normal warp/shared-memory interpretation.
+
+The current 64B row stride creates a 16-way bank pattern:
+
+  stride_words = 64B / 4B = 16
+  gcd(16, 32 banks) = 16
+  max conflict = 16-way
+
+Important caveat:
+  cp.async.bulk.shared writes are not identical to a normal ld.shared/st.shared
+  issue path, so the async copy engine may not expose this as the same
+  instruction-level bank conflict. But the produced smem layout is still
+  bank-hot for a later normal shared-memory consumer that reads rows in rank
+  order.
+
+
+Better shapes to consider
+-------------------------
+
+If 16B alignment is required for each row/chunk, fully conflict-free 32-rank
+row bases are not possible with a simple 64B aligned row stride, because the
+base bank step is a multiple of 4.
+
+Current:
+
+  row stride = 64B
+  stride_words = 16
+  gcd(16,32) = 16
+  max conflict = 16-way
+
+Padding/skew candidate:
+
+  row stride = 80B
+  stride_words = 20
+  gcd(20,32) = 4
+  max conflict = 4-way
+
+Another candidate:
+
+  row stride = 112B
+  stride_words = 28
+  gcd(28,32) = 4
+  max conflict = 4-way
+
+If the consumer can tolerate 4B-skewed rows:
+
+  row stride = 68B
+  stride_words = 17
+  gcd(17,32) = 1
+  max conflict = 1-way
+
+but 68B row stride loses 16B alignment after rank0, so it is probably not
+valid for the current cp.async.bulk 64B destination shape.
+
+
+Recommended current conclusion
+------------------------------
+
+Current smem mapping:
+
+  smem + (rank << 6), 64B/thread
+
+is not good if the next stage consumes this with normal warp-level shared
+loads by rank/component.
+
+If this smem stage is only a transient async-copy landing and the consumer is
+tcgen05/TMA-shaped, then bank conflicts must be re-evaluated against that
+consumer's actual access pattern.
+
+For now:
+
+  W13/M13/S13 L2 prefetch: no smem bank issue.
+  S13 shared fill at rank*64: 16-way bank-hot layout.
+
+Status:
+  not confirmed good.
+  bank map says current shared destination needs skew/padding or a consumer-
+  specific proof.
