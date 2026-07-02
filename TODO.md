@@ -1,322 +1,393 @@
-# sm12x TODO / Co-Design Board
+# sm12x xRR48 TODO / Live Blackboard
 
-- [x] Padded Sentinel based premption (8*32-bit reg can hold information of total tokens, for now repeated 8 times)
+This repo is the live blackboard. Cleaned/finalized slices can move to
+`Fused-Sparse-NVFP4-Kernels` later.
 
-- []
+Current focus:
 
+```text
+kernel.cu
+CTA=1024
+1 CTA = 1 SM = 1 expert
+rr32x32 issue fabric
+full-I x H256 W/M/S prefetch unit
+S13 smem landing + bank map
+```
 
+Do not drift back to the old CTA256/I64 board except as lineage.
+
+## Current Lock
+
+- [x] CTA1024 is the current board.
+- [x] Current prefetch unit is intentionally full-I x H256.
+- [x] H256 was chosen because RTX PRO 6000 has enough L2 to make this regime plausible.
+- [x] `kernel_bank_map.txt` is the current bank-conflict artifact.
+- [x] W13/M13/S13 source layouts remain checkpoint-native and unchanged.
+- [x] `rr32x32.thread_rank()` is the warp-rank inside a lane-label group; this is part of the board, not an open question.
+
+```text
+rr32x32 = labeled_partition(cta1024, ((thread_rank ^ 32) & 31))
+
+because:
+  ((tid ^ 32) & 31) == (tid & 31)
+
+therefore:
+  meta_group_rank = lane id 0..31
+  thread_rank     = physical warp id 0..31
+
+important:
+  rr rank 00..31 are one lane across 32 physical warps,
+  not 32 lanes inside one physical warp.
+```
+
+## rr32x32 Horizontal Board
+
+```text
+physical:
+  tid = warp*32 + lane
+
+partition:
+  label = (tid ^ 32) & 31 = lane
+
+rr view:
+  meta_group_rank = lane
+  thread_rank     = warp
+```
+
+Compressed horizontal map:
+
+```text
+rr/lane  physical tids across rank
+-------  ----------------------------------------------------------
+rr00     000, 032, 064, 096, ..., 992      rank 00..31 = warp 00..31
+rr01     001, 033, 065, 097, ..., 993      rank 00..31 = warp 00..31
+rr02     002, 034, 066, 098, ..., 994      rank 00..31 = warp 00..31
+rr03     003, 035, 067, 099, ..., 995      rank 00..31 = warp 00..31
+...
+rr31     031, 063, 095, 127, ..., 1023     rank 00..31 = warp 00..31
+```
+
+Use:
+
+```text
+rr lane bucket -> selects stream / phase
+rr rank        -> walks 32 full-I stripes
+```
 
 ## Pressing / Next
 
-- [x] Keep sm12x sketch inline for now.
+- [ ] Fix syntax/hygiene only after board is stable.
 
 ```text
-xRR48_sm12x.cu:
-  kernel orchestration
-  layout boards
-  loop order
-  raw PTX
-
-no helpers yet:
-  lower register pressure
-  easier to see exact index math
-  move only real repeated PTX later
+known syntax/hygiene:
+  namespace alias line
+  missing includes / aliases
+  rrip declaration
+  malformed if parens around rr32x32.meta_group_rank()
+  inline asm operand separators
+  [%0 + 32] / [%1 + 1024] PTX operand form
+  mbar operand should be shared address object, not raw array pointer
 ```
 
-- [x] Add clean sideband bring-up file.
+- [ ] Lock current S13 shared landing as a real consumer contract.
 
 ```text
-xRR48_sm12x_sideband.cu:
-  no W13
-  no ldmatrix
-  no tmem
-  M13: [E,H128,I<<2] -> smem by TMA + mbar
-  S13: [E,H128,I<<1] -> smem by LDGSTS
+current good pattern:
+  copy issue:
+    one lane / physical warp
+    2 x 32B rows per rr rank
+
+  consumer:
+    rank-pair / row-pair
+    full 32-bank coverage
+
+bad pattern:
+  component-across-ranks
+  16-way bank-hot
 ```
 
-- [x] Lock current `I` tile name: `I64 == I128'`.
+- [ ] Decide whether M13 should share the same rank-pair row-pair smem discipline.
+- [ ] Decide whether M13+S13 stay in the same sideband bucket or split.
 
 ```text
-current W13 sketch:
-  one i-step = 8 warps x 512B
-             = 4096B
-             = 1024 u32
-             = 64 original-i rows x 16 W13 packets
+current direction:
+  rr0,1 -> W13
+  rr2,3 -> M13 + S13 prefetch
+  rr2   -> S13 smem fill sketch
 
-therefore:
-  current panel = I64 x H128
-  I64 == I128'
-  because:
-    I64 Up
-    I64 Gate
+open:
+  rr2 only for S13 fill?
+  rr2/3 both fill?
+  M13 smem fill next to S13 or separate?
 ```
 
-- [x] Fix W13 loop bound / name.
+- [ ] Write W13 L2->smem/tmem/rmem stage after W13 prefetch board is stable.
+- [ ] Decide W13 consumer landing shape before changing W13 bytes/thread.
+- [ ] Recompute mbar `expect_tx` after final M13/S13 smem fill shape.
+- [ ] Keep `wait_group` cadence explicit: traffic governor vs deep pipe.
+- [ ] Add OOB/tail byte handling for non-ideal H/I only after the main board is stable.
+
+## Current Throughput / Traffic Board
+
+Current intended unit:
 
 ```text
-old:
-  for i < ((I << 4) >> 7)
-  addr += i << 10
+full-I x H256
 
-problem:
-  bound says 128 u32 chunks
-  addr step says 1024 u32 chunks
-
-now:
-  i < (I >> 6)
-  addr = i64 << 10
+I = 2048
+H256 = 2 x H128
+proj = W1/W3
 ```
 
-- [x] Fix M13 active-lane index.
+Per SM / per kt group:
 
 ```text
-current active lanes:
-  lane = threadIdx.x & 31
-  active if lane < 2
-  8 warps x 2 lanes x 16B = 256B
-
-current index:
-  (warp + lane) << 2
-
-problem:
-  w0.l1 == w1.l0
-  w1.l1 == w2.l0
-  aliasing
-
-candidate:
-  (((threadIdx.x >> 5) << 1) + (threadIdx.x & 1)) << 2
-  16 lanes -> 16 contiguous 16B packets
+W13 = 256KB
+M13 =  64KB
+S13 =  32KB
+WMS = 352KB
 ```
 
-- [x] Restore CTA-local topk sentinel before state.
+Across 148 SM:
 
 ```text
-topk_bitplanes[e][0] == 0:
-  load sentinel
-  CTA sync
-  return before rmem/smem/mbar/tmem
+W13 = 148 * 256KB = 37.0 MiB
+WMS = 148 * 352KB = 50.9 MiB
 ```
 
-- [x] Wire `mtbar[0]` init.
+Interpretation:
 
 ```text
-mtbar[0]:
-  stage mbar
+WMS = W13 + M13 + S13
 
-init:
-  thread0
-  mbarrier.init.layout::v0.shared::cta.b64
-  sync
+W13 is the main traffic.
+M13/S13 are sideband, but still 96KB / SM for full-I x H256.
 ```
 
-- [x] Fill M13 16B issuer smem indexing.
+## Current Horizontal Prefetch / Smem-Tx Board
+
+### Prefetch Buckets
 
 ```text
-M13:
-  4 stages x 256B = 1024B
-  1024B = I64 x 4 M13 packets
-
-m0 smem+0000..0255 -> i00..15
-m1 smem+0256..0511 -> i16..31
-m2 smem+0512..0767 -> i32..47
-m3 smem+0768..1023 -> i48..63
+rr   lane  ranks       stream      hp      bytes/rank  total
+--   ----  ----------  ----------  ------  ----------  ------
+00   00    warp00..31  W13         kt+0    4096B       128KB
+01   01    warp00..31  W13         kt+1    4096B       128KB
+02   02    warp00..31  M13 + S13   kt+0    1024+512B   48KB
+03   03    warp00..31  M13 + S13   kt+1    1024+512B   48KB
 ```
 
-- [x] Explain `for (m=0; m<4; m++)`.
+Total per kt step:
 
 ```text
-M13 / i row:
-  4 u32 = 16B
-  {m1 h000..063, m1 h064..127, m3 h000..063, m3 h064..127}
-
-M13 / I64:
-  64 rows x 16B = 1024B
-
-16B issue wave:
-  lane0,lane1 / warp
-  16 lanes x 16B = 256B
-
-therefore:
-  4 waves x 256B = 1024B
-  m0 -> i00..15
-  m1 -> i16..31
-  m2 -> i32..47
-  m3 -> i48..63
+W13 = 256KB
+M13 =  64KB
+S13 =  32KB
+WMS = 352KB
 ```
 
-- [ ] Write the throughput board before writing more code.
+### W13 Prefetch Horizontal
 
 ```text
-W13:
-  gmem->L2 prefetch
-  512B / warp
-  8 warps
-  4096B / CTA step
+W13 base:
+  W13 + e*(H>>7)*(I<<4) + hp*(I<<4)
 
-M13/S13:
-  LDGSTS or TMA
-  16B / active thread
-  active 2 lanes / warp
-  8 warps
-  256B / CTA step
+rank chunk:
+  rank << 10 u32 = rank * 4096B
+
+rank -> original i range:
+  rank00 -> i0000..0063
+  rank01 -> i0064..0127
+  rank02 -> i0128..0191
+  rank03 -> i0192..0255
+  ...
+  rank31 -> i1984..2047
 ```
 
-## Current Sketch Board
+Horizontal:
 
 ```text
-CTA=256
-8 warps
-warp = threadIdx.x >> 5
-lane = threadIdx.x & 31
+rr00 W13 hp=kt+0:
+  r00 i0000..0063 | r01 i0064..0127 | ... | r31 i1984..2047
 
-W13:
-  lane0 / warp issues 512B L2 prefetch
-  8 lanes total
-  4096B panel
-
-M13:
-  lane0,lane1 / warp issue 16B TMA
-  mbar expect_tx = 1024B
-  4 waves x 256B
-
-S13:
-  lane0,lane1 / warp issue 16B LDGSTS
-  2 waves x 256B
+rr01 W13 hp=kt+1:
+  r00 i0000..0063 | r01 i0064..0127 | ... | r31 i1984..2047
 ```
 
-## W13 Board
+### M13/S13 Prefetch Horizontal
 
-### Source
+```text
+M13 base:
+  M13 + e*(H>>7)*(I<<2) + hp*(I<<2)
+
+M13 rank chunk:
+  rank << 8 u32 = rank * 1024B
+  rank00 -> i0000..0063
+  rank01 -> i0064..0127
+  ...
+  rank31 -> i1984..2047
+
+S13 base:
+  S13 + e*(H>>7)*(I<<1) + hp*(I<<1)
+
+S13 rank chunk:
+  rank << 7 u32 = rank * 512B
+  rank00 -> i0000..0063
+  rank01 -> i0064..0127
+  ...
+  rank31 -> i1984..2047
+```
+
+Horizontal:
+
+```text
+rr02 hp=kt+0:
+  M13 r00..r31 | S13 r00..r31
+
+rr03 hp=kt+1:
+  M13 r00..r31 | S13 r00..r31
+```
+
+### Current S13 L2 -> Smem Tx
+
+```text
+predicate:
+  meta_group_rank == 2
+
+dst:
+  row0 = smem + rank*64 + 00
+  row1 = smem + rank*64 + 32
+
+tx:
+  row0 <- 32B
+  row1 <- 32B
+
+rank:
+  rr32x32.thread_rank() = physical warp id
+```
+
+Destination horizontal:
+
+```text
+rank   dst row0          dst row1          banks row0  banks row1
+----   ---------------   ---------------   ----------  ----------
+00     smem+0000..0031   smem+0032..0063   00..07      08..15
+01     smem+0064..0095   smem+0096..0127   16..23      24..31
+02     smem+0128..0159   smem+0160..0191   00..07      08..15
+03     smem+0192..0223   smem+0224..0255   16..23      24..31
+...
+31     smem+1984..2015   smem+2016..2047   16..23      24..31
+```
+
+Good consumer horizontal:
+
+```text
+rank pair = (2p, 2p+1)
+
+lane 00..07 -> even rank row0 -> banks 00..07
+lane 08..15 -> even rank row1 -> banks 08..15
+lane 16..23 -> odd  rank row0 -> banks 16..23
+lane 24..31 -> odd  rank row1 -> banks 24..31
+
+result:
+  lanes 00..31 -> banks 00..31
+```
+
+Bad consumer:
+
+```text
+lane k -> smem + k*64 + const
+=> component-across-ranks
+=> 16-way hot
+```
+
+Source tx board to finish:
+
+```text
+current source expression:
+  src0 = S13 + e*(H>>7)*(I<<1) + hp*(I<<1) + (rank << 4)
+  src1 = src0 + 1024B
+
+note:
+  rank << 4 is u32 arithmetic = rank * 64B
+
+open:
+  verify intended source tiling for src1 = src0 + 1024B
+  decide rank gating / rri use so the source rows do not get ambiguous
+  preserve the dst bank-clean rank-pair shape
+```
+
+## W13 Layout
+
+Keep this layout pinned. Horizontal view only.
 
 ```text
 W13: [E, (H+127)>>7, I<<4]
 
 per original i / H128:
-  w1 h000..015
-  w1 h016..031
-  w1 h032..047
-  w1 h048..063
-  w1 h064..079
-  w1 h080..095
-  w1 h096..111
-  w1 h112..127
-  w3 h000..015
-  w3 h016..031
-  w3 h032..047
-  w3 h048..063
-  w3 h064..079
-  w3 h080..095
-  w3 h096..111
-  w3 h112..127
+
+u32:   00           01           02           03           04           05           06           07
+W1:    h000..015    h016..031    h032..047    h048..063    h064..079    h080..095    h096..111    h112..127
+
+u32:   08           09           10           11           12           13           14           15
+W3:    h000..015    h016..031    h032..047    h048..063    h064..079    h080..095    h096..111    h112..127
 ```
 
-### gmem->L2, current sketch
+Packet:
 
 ```text
-i64 panel:
-  base = W13
-       + e * ((H+127)>>7) * (I<<4)
-       + kt * (I<<4)
-       + i64 * 1024
-
-warp issue:
-  w0 lane0 -> base + 0000 u32 -> 512B
-  w1 lane0 -> base + 0128 u32 -> 512B
-  w2 lane0 -> base + 0256 u32 -> 512B
-  w3 lane0 -> base + 0384 u32 -> 512B
-  w4 lane0 -> base + 0512 u32 -> 512B
-  w5 lane0 -> base + 0640 u32 -> 512B
-  w6 lane0 -> base + 0768 u32 -> 512B
-  w7 lane0 -> base + 0896 u32 -> 512B
-
-total:
-  8 x 512B = 4096B
-  1024 u32
-  I64 x 16 packets
+1 W13 u32 packet = 8 stored nvfp4 values = 16 sparse H positions
+per i/proj/H128 = 8 W13 packets = 32B
+per i/W1+W3/H128 = 16 W13 packets = 64B
 ```
 
-### Horizontal view
+Current full-I x H256:
 
 ```text
-one W13 prefetch panel = I64 x H128 = I128' x H128
+I2048 x H128:
+  2048 * 64B = 128KB
 
-             u32 000..127   128..255    256..383    384..511    512..639    640..767    768..895    896..1023
-             ------------   ---------    ---------    ---------    ---------    ---------    ---------    ----------
-issuer       w0.l0          w1.l0        w2.l0        w3.l0        w4.l0        w5.l0        w6.l0        w7.l0
-bytes        0000..0511     0512..1023   1024..1535   1536..2047   2048..2559   2560..3071   3072..3583   3584..4095
-meaning      I00..07        I08..15      I16..23      I24..31      I32..39      I40..47      I48..55      I56..63
+I2048 x H256:
+  2 * 128KB = 256KB
 ```
 
-### Vertical view
+## M13 Layout
 
-```text
-W13 checkpoint
-  |
-  | 8 lane0 issuers
-  | 512B / warp
-  v
-L2
-  |
-  | later: TMA / LDGSTS / shaped smem fill
-  | open: exact tx path
-  v
-smem / tmem / rmem
-  |
-  | W1/W3 H128 panel
-  v
-FF1
-```
-
-## M13 Board
-
-### Source
+Keep this layout pinned. Horizontal view only.
 
 ```text
 M13: [E, H128, I<<2]
 
 per original i / H128:
-  m1 h000..063
-  m1 h064..127
-  m3 h000..063
-  m3 h064..127
+  u32 00: m1 h000..063
+  u32 01: m1 h064..127
+  u32 02: m3 h000..063
+  u32 03: m3 h064..127
 
 ratio:
   M13 = W13 / 4
 ```
 
-### 16B issuer direction
+Packet:
 
 ```text
-active:
-  lane0,lane1 per warp
-  16 active threads
-  16B/thread
-  256B total
-
-correct lane id:
-  mid = (warp << 1) + lane01
-  lane01 = lane & 1
-
-issue:
-  mid00 -> u32 00..03
-  mid01 -> u32 04..07
-  mid02 -> u32 08..11
-  mid03 -> u32 12..15
-  ...
-  mid15 -> u32 60..63
+per i/H128:
+  4 u32 = 16B
 ```
 
-### TODO
+Current full-I x H256:
 
-- [x] Correct M13 source to W13 H128 regime.
-- [x] Add M13 TMA smem stage in `xRR48_sm12x_sideband.cu`.
-- [x] Add M13 mbar init / expect_tx / wait wiring for fixed 1024B panel.
-- [ ] Review if M13 should stay 16B issued TMA or use larger tx.
-- [ ] Write M13 smem bank layout before tmem/rmem handoff.
+```text
+I2048 x H128:
+  2048 * 16B = 32KB
 
-## S13 Board
+I2048 x H256:
+  2 * 32KB = 64KB
+```
 
-### Source
+## S13 Layout
+
+Keep this layout pinned. Horizontal view only.
 
 ```text
 S13: [E, H128, I<<1]
@@ -326,119 +397,170 @@ one u32:
   128 sparse cols
 
 per original i / H128:
-  s1 i h000..127
-  s3 i h000..127
+  u32 00: s1 h000..127
+  u32 01: s3 h000..127
 
 ratio:
   S13 = W13 / 8
 ```
 
-### TODO
-
-- [x] Correct S13 source to W13 H128 regime.
-- [x] Add S13 LDGSTS smem stage in `xRR48_sm12x_sideband.cu`.
-- [x] Add S13 raw smem stage:
+Important:
 
 ```text
-S13 / I64:
-  64 rows x 8B = 512B
+S13 has nothing to do with n8 structurally.
+S13 is H/K-side scale sidecar.
 
-LDGSTS:
-  16 lanes x 16B = 256B
-
-s0 smem+1024..1279 -> i00..31
-s1 smem+1280..1535 -> i32..63
+per original i/proj/H128:
+  1 S13 packet corresponds to 8 W13 packets.
 ```
 
-- [ ] Keep `ldmatrix` parked until M13/S13 smem hold is reviewed.
-- [ ] Pack S13 `ldmatrix` regs into F233 row order:
+Packet:
 
 ```text
-raw:
-  s13_0 -> i00..15 subtile
-  s13_1 -> i16..31 subtile
-  s13_2 -> i32..47 subtile
-  s13_3 -> i48..63 subtile
-
-target:
-  row00 = {s1 i00, s1 i32, s3 i00, s3 i32}
-  row01 = {s1 i01, s1 i33, s3 i01, s3 i33}
-  ...
-  row31 = {s1 i31, s1 i63, s3 i31, s3 i63}
+per i/H128:
+  2 u32 = 8B
 ```
 
-- [ ] Review final S13 tmem layout against PTX F233 sparse SFA pane.
-
-## TMA / LDGSTS Throughput Board
+Current full-I x H256:
 
 ```text
-W13:
-  target large tx
-  512B / warp prefetch
-  4096B / CTA prefetch panel
-  good match for later bulk movement
+I2048 x H128:
+  2048 * 8B = 16KB
 
-M13/S13:
-  small sideband
-  16B/thread LDGSTS candidate
-  2 active lanes/warp
-  256B / CTA issue
+I2048 x H256:
+  2 * 16KB = 32KB
+```
 
-open:
-  verify 512B prefetch legality / split if needed
-  verify wait-group cadence
-  verify overlap with mbar/tmem alloc
-  verify smem bank map before tcgen05 handoff
+## Smem Bank Board
+
+Current S13 landing:
+
+```text
+rank = rr32x32.thread_rank()
+dst0 = smem + rank*64 + 00
+dst1 = smem + rank*64 + 32
+```
+
+Bank map:
+
+```text
+even rank:
+  row0 -> banks 00..07
+  row1 -> banks 08..15
+
+odd rank:
+  row0 -> banks 16..23
+  row1 -> banks 24..31
+```
+
+Good consumer:
+
+```text
+consume adjacent rank pairs:
+
+lane 00..07 -> even rank row0 -> banks 00..07
+lane 08..15 -> even rank row1 -> banks 08..15
+lane 16..23 -> odd  rank row0 -> banks 16..23
+lane 24..31 -> odd  rank row1 -> banks 24..31
+```
+
+Bad consumer:
+
+```text
+lane k -> smem + k*64 + const
+
+result:
+  component-across-ranks
+  16-way bank-hot
+```
+
+Artifact:
+
+```text
+kernel_bank_map.txt
 ```
 
 ## Orchestration Board
 
 ```text
 stage 0:
-  sentinel pre-emption
+  padded sentinel / Xb pre-emption
+  return before heavy state when empty
 
 stage 1:
   mbar init
-  tmem alloc
-  taddr/mbar pass
+  smem allocated
+  rmem indexing regs live
 
 stage 2:
   W13 gmem->L2 prefetch
-  M13/S13 LDGSTS or TMA sideband
+    rr0,rr1
+    full-I x H256
+
+  M13/S13 gmem->L2 prefetch
+    rr2,rr3
+    full-I x H256 sideband
 
 stage 3:
-  smem->tmem / rmem handoff
+  S13 L2->smem sketch
+  rank-pair bank-clean consumer contract
 
 stage 4:
+  M13 L2->smem
+  W13 L2->smem/tmem/rmem
+  dequant / MMA feed
+
+stage 5:
   FF1
   SwiGLU
   topkW
-  FF2
+  store / later FF2
 ```
 
-## Code Hygiene
+## Active Review Items
 
-- [ ] Add includes / aliases (`cuda_bf16.h`, `stdint.h`, `uint32`, `uint16`, `uchar`).
-- [x] Fix `threadIdx >> 5` -> `threadIdx.x >> 5`.
-- [ ] Keep index math inline, comments as boards.
-- [ ] No register-heavy helper abstractions in the kernel.
-- [ ] Helpers only for PTX repetition / state ops.
-- [ ] No local nvcc until requested.
+- [ ] Decide whether S13 smem fill should use rr2 only or rr2+rr3.
+- [ ] Finish S13 smem source tiling around `src1 = src0 + 1024B`.
+- [ ] Add M13 smem fill map and bank proof.
+- [ ] Add W13 destination map and bank proof.
+- [ ] Define S13 rank-pair consumer code before changing the smem layout.
+- [ ] Define M13 consumer before choosing final sideband bucket layout.
+- [ ] Decide whether `wait_group 1` is traffic governance or an unfinished placeholder.
+- [ ] Recompute exact `mbarrier.init` count and `expect_tx` once fill shape is fixed.
+- [ ] Keep OOB/tail bytes parked until main path compiles as a sketch.
+- [ ] Do not run local `nvcc` unless explicitly requested.
+
+## Syntax / Compile Hygiene
+
+Keep these separate from architecture review.
+
+- [ ] Fix namespace alias.
+- [ ] Add `cuda_bf16.h`, `stdint.h`, and type aliases.
+- [ ] Declare `rrip`.
+- [ ] Fix malformed `if` around `meta_group_rank == (2+k)`.
+- [ ] Fix inline PTX operand list separators.
+- [ ] Review whether `[%0 + 32]` and `[%1 + 1024]` are legal PTX forms.
+- [ ] Pass mbar shared address correctly into `cp.async.bulk.shared...mbarrier`.
+- [ ] Add `memory` clobbers where needed.
 
 ## Parked
 
-- [ ] Exact mbar tx counts.
-- [ ] Proxy fence placement.
-- [ ] tcgen05 commit/wait.
 - [ ] Final W13 tmem shape.
-- [ ] Final M13/S13/SX sideband tmem shape.
-- [ ] 2CTA variant.
+- [ ] Final M13/S13/SX tmem shape.
+- [ ] Proxy fence placement.
+- [ ] `tcgen05` commit/wait.
+- [ ] 2CTA / 2SM variant.
+- [ ] FF2 / PDL / CLC.
+- [ ] Public README / cleaned Fused repo transfer.
 
-## Completed / Carried From xRR48
+## Completed / Carried
 
-- [x] W13/M13/S13 checkpoint-native layouts are the right starting point.
-- [x] CTA-local sentinel pre-emption belongs before heavy state.
+- [x] W13/M13/S13 checkpoint-native layouts are the correct baseline.
+- [x] CTA-local sentinel/pre-emption belongs before heavy state.
 - [x] M13 = W13 / 4.
 - [x] S13 = W13 / 8.
-- [x] S13 scale packet = one u32 = 4x u8 = 128 sparse cols.
-- [x] Comments must be maps, not prose blobs.
+- [x] S13 packet = one u32 = 4x u8 = 128 sparse cols.
+- [x] S13 is K/H-side scale sidecar, not n8-side data.
+- [x] `rr32x32.meta_group_rank() -> lane`, `rr32x32.thread_rank() -> warp` is the intended fabric.
+- [x] `rr32x32` bank-map artifact updated for the current kernel.
+- [x] Comments should stay as maps/formulas, not prose blobs.
