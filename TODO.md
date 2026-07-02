@@ -6,12 +6,121 @@ Current scope:
 ```text
 CTA1024
 1 CTA = 1 SM = 1 expert / cluster
-ff1 W13/M13/S13 prefetch
-S13 L2 -> smem sketch
-no W13 consumer / mma path locked yet
+ff1 W13/M13/S13 L2 prefetch + staging substrate
+target consumer = 32 x m16n8k128 mma.sp
+NVFP4 sparse 4:8 pairwise
+consumer path not implemented yet
 ```
 
 Do not drift back to the old CTA256 / I64 split board except as lineage.
+
+## Co-Design Summary
+
+Goal:
+
+```text
+per expert / per SM:
+  build W13/M13/S13 + X4/SX substrate
+  then consume post-staging as 32 x m16n8k128 mma.sp
+
+dtype:
+  NVFP4 sparse 4:8 pairwise
+
+macro:
+  ff1 W13/M13/S13 -> SwiGLU -> topk_W -> store / later ff2 path
+```
+
+CTA / expert:
+
+```text
+CTA1024 = 32 warps
+1 CTA = 1 SM = 1 expert cluster
+blockIdx.x = expert e
+
+sentinel:
+  Xb says whether this expert has live routed work
+  empty expert -> CTA returns early
+```
+
+MMA target:
+
+```text
+32 warps -> 32 x m16n8k128 mma.sp
+
+N=8:
+  MMA n8 axis
+  not TOPK
+
+TOPK:
+  routing sparsity / expert hit control
+```
+
+Sparse NVFP4 contract:
+
+```text
+W13:
+  fused W1/W3 sparse weights
+  [E, H128, I<<4]
+  per original i/H128 = 16 u32 = 64B
+  W1 32B + W3 32B
+
+M13:
+  pairwise sparse metadata sidecar
+  [E, H128, I<<2]
+  per original i/H128 = 4 u32 = 16B
+
+S13:
+  K/H-side NVFP4 scale sidecar
+  [E, H128, I<<1]
+  per original i/H128 = 2 u32 = 8B
+
+X4/SX:
+  sparse/quant activation payload + scale side
+```
+
+Panel unit:
+
+```text
+kt += 2
+H256 = H128(kt+0) + H128(kt+1)
+
+prefetch is full-I x H256 per expert/SM
+staging then carves the post-loop operand substrate
+```
+
+Traffic per kt / SM:
+
+```text
+W13 = 256KB
+M13 =  64KB
+S13 =  32KB
+WMS = 352KB
+```
+
+rr fabric:
+
+```text
+rr = lane 00..31
+r  = warp rank 00..31
+
+rr00/01 -> W13 L2 prefetch, hp kt+0 / kt+1
+rr02/03 -> M13/S13 L2 prefetch, hp kt+0 / kt+1
+rr04..07 + rr16..31 -> staged gmem->smem/tmem/rmem tx lanes
+
+L2 is the rendezvous:
+  producer rr lane does not need to equal tx rr lane
+```
+
+Correctness target:
+
+```text
+after staging loop:
+  final substrate must be aligned for 32 x m16n8k128 mma.sp
+  W13 packets + M13 metadata + S13 scales must match sparse 4:8 pairwise K=128 consumption
+
+consumer not implemented yet:
+  current work is verifying source/dst indexing, bank shape, and staging order
+```
 
 ## Current Lock
 

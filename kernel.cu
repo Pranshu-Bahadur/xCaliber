@@ -27,7 +27,7 @@ __global__ void kernel(
     cg::coalesced_group rr32x32 = cg::labeled_partition(cta1024, ((cta1024.thread_rank() ^ 32) & 31));
 
 	uint32_t rmem[48]; //16 32-bit for indexing
-	__shared__ alignas(16) uchar smem[32728]; //32768B : 98304B
+	__shared__ alignas(16) uchar smem[16384]; //16384B : 98304B + 16384B
     __shared__ alignas(16) uint64_t mbar[5];
 
     if (!((threadIdx.x ^ 4) & 3)){
@@ -227,7 +227,6 @@ __global__ void kernel(
                                 ),
                                 "r"((uint32_t)__cvta_generic_to_shared(mbar))
                         );
-
                 }
             }
         }

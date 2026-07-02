@@ -1,17 +1,17 @@
-kernel.cu interleave + smem bank map
-=====================================
+kernel.cu indexing / interleave / post-k smem map
+==================================================
 
 File reviewed:
   /home/pranshubahadur/Documents/code/xCaliber/kernel.cu
 
-Status:
-  source-of-truth map from the current formulas
-  syntax ignored except where it changes the map
-  this is not a report card; it is the horizontal board
+Read mode:
+  syntax ignored where it is clearly sketch syntax
+  address formulas taken exactly from current kernel.cu
+  consumer is assumed to happen after the rri/k staging loop
 
 
-Core rr32x32 invariant
-----------------------
+rr32x32 invariant
+-----------------
 
   tid = warp*32 + lane
   rr  = rr32x32.meta_group_rank()
@@ -32,60 +32,52 @@ Horizontal:
   ...
   rr31: tid 031,063,095,...,1023  r00..31
 
-Important:
+Use:
 
-  rr lane selects stream / phase.
-  r walks the 32 warp-rank stripes.
+  rr lane -> stream / phase / tx-lane bucket
+  r       -> 32 physical warp ranks
 
 
-Packet layout reminder
-----------------------
+Packet units
+------------
 
 W13:
 
-  W13: [E, H128, I<<4] u32
-
-  per original i / H128:
-    W1 = u32 00..07 = 32B
-    W3 = u32 08..15 = 32B
-
-  per original i / W13 / H128:
-    16 u32 = 64B
+  [E, H128, I<<4] u32
+  per i / H128:
+    W1 = 8 u32 = 32B
+    W3 = 8 u32 = 32B
+    W13 = 16 u32 = 64B
 
   1 W13 u32 = 4B = I16 packet
 
 M13:
 
-  M13: [E, H128, I<<2] u32
-  per original i / H128 = 4 u32 = 16B
+  [E, H128, I<<2] u32
+  per i / H128 = 4 u32 = 16B
 
 S13:
 
-  S13: [E, H128, I<<1] u32
-  per original i / H128 = 2 u32 = 8B
+  [E, H128, I<<1] u32
+  per i / H128 = 2 u32 = 8B
 
-Bank:
+smem:
 
-  bank = (smem_byte >> 2) & 31
+  bank = (byte >> 2) & 31
 
 
 L2 prefetch board
 -----------------
 
-Loop:
+Common:
 
-  kt += 2
-  hp = kt + ((rr ^ 2) & 1)
+  hp(rr) = kt + ((rr ^ 2) & 1)
+         = kt + (rr & 1)
 
-Since bitwise ^2 does not change the low bit:
+Prefetch:
 
-  even rr -> hp=kt+0
-  odd  rr -> hp=kt+1
-
-Prefetch horizontal:
-
-  rr   hp      stream       src rank coord        bytes/rank
-  --   ------  -----------  --------------------  ----------
+  rr   hp      stream       src rank coord        bytes/r
+  --   ------  -----------  --------------------  -------
   00   kt+0    W13          r << 10 u32           4096B
   01   kt+1    W13          r << 10 u32           4096B
   02   kt+0    M13 + S13    M:r<<8, S:r<<7 u32    1024B + 512B
@@ -93,80 +85,105 @@ Prefetch horizontal:
 
 W13 per issuing thread:
 
-  4096B = 1024 u32 packets
+  4096B = 1024 u32
          = I512' = (I256, I256)
                    W1     W3
 
-  derived original-i view:
-    1024 u32 / 16 u32 per original i = i64
+Per kt step / SM:
 
-Traffic per kt step / SM:
-
-  W13 = 2 * 32 ranks * 4096B = 256KB
-  M13 = 2 * 32 ranks * 1024B =  64KB
-  S13 = 2 * 32 ranks *  512B =  32KB
+  W13 = 2 * 32 * 4096B = 256KB
+  M13 = 2 * 32 * 1024B =  64KB
+  S13 = 2 * 32 *  512B =  32KB
   WMS = 352KB
 
 
-Interleave timeline
--------------------
+Staging loop board
+------------------
 
-Current code:
+Current loop:
 
-  for k = 0 only
-    for rri = 0, 4
+  for rri = 0,4:
+    for k = 0,1:
+      S13 wait/sync/tx
+      M13 wait/sync/tx
+      W13 wait/sync/tx
 
-Wait election:
+Wait elected ranks:
 
-  rrip = 0..3
-  elected rank = (rri << 2) + rrip
+  elected rank = (rri << 2) + rrip, rrip=0..3
 
-Thus:
+  rri=0 -> r00,r01,r02,r03
+  rri=4 -> r16,r17,r18,r19
 
-  rri=0 -> elected r00,r01,r02,r03
-  rri=4 -> elected r16,r17,r18,r19
+Important:
 
-Horizontal per rri beat:
-
-  beat A:
-    rr02 elected ranks wait_group 1
-    rr02 + rr05 sync
-    rr05 issues S13 smem tx
-
-  beat B:
-    rr02 elected ranks wait_group 0
-    rr02 + rr04 + rr06 sync
-    rr04 + rr06 issue M13 smem tx
-
-  beat C:
-    rr00 elected ranks wait_group 0
-    rr00 + rr16..31 sync
-    rr16..31 issue W13 smem tx
-
-Crucial:
-
-  rri only appears in wait election.
-  rri does NOT appear in S13/M13/W13 tx src.
-  rri does NOT appear in S13/M13/W13 tx dst.
+  rri appears only in wait election.
+  rri does not appear in S13/M13/W13 tx src.
+  rri does not appear in S13/M13/W13 tx dst.
 
 Therefore:
 
-  rri=0 and rri=4 replay the same tx address maps.
+  rri=0 and rri=4 replay the same tx maps.
 
-Interpretation:
+Post-k consumer implication:
 
-  The interleave idea is:
+  final smem image is not "beat A then consume".
+  final smem image is after:
 
-    rr00/01/02/03 warm L2 with large full-panel prefetch.
-    rr04/05/06 and rr16..31 later issue smaller gmem->smem tx.
-    wait_group lanes are timing / pacing gates.
-    producer lane does not need to equal tx lane if L2 is the rendezvous.
+    rri0/k0 tx
+    rri0/k1 tx
+    rri4/k0 tx
+    rri4/k1 tx
 
-  Correctness then depends on:
+  Repeated same-address tx may be idempotent only if same src and same bytes.
+  Here several repeated/colliding tx have different src panels/coords.
 
-    tx source addresses lying inside the prefetched panels
-    tx destination addresses being unique for the intended tile
-    consumer reading the produced smem layout bank-clean
+
+Per-k tx schedule
+-----------------
+
+k=0:
+
+  S13:
+    wait rr02 elected ranks
+    sync rr02 + rr05
+    tx rr05
+
+  M13:
+    wait rr02 elected ranks
+    sync rr02 + rr04 + rr06
+    tx rr04 + rr06
+
+  W13:
+    wait rr00 elected ranks
+    sync rr00 + rr16..31
+    tx rr16..31
+
+k=1:
+
+  S13:
+    wait rr03 elected ranks
+    sync rr03 + rr06
+    tx rr06
+
+  M13:
+    wait rr03 elected ranks
+    sync rr03 + rr05 + rr07
+    tx rr05 + rr07
+
+  W13:
+    wait rr01 elected ranks
+    sync rr01 + rr16..31
+    tx rr16..31
+
+This is the right high-level interleave:
+
+  rr00/01 warm W13
+  rr02/03 warm M13/S13
+  rr04..07 stage sideband to smem
+  rr16..31 stage W13 to smem
+
+But final correctness is determined by the tx address maps below.
 
 
 S13 tx map
@@ -174,63 +191,72 @@ S13 tx map
 
 Predicate:
 
-  rr == 5
+  rr == 4+k+1
 
-Panel:
+Thus:
+
+  k0 -> rr05
+  k1 -> rr06
+
+Formula:
+
+  src = S13 + hp(rr)*(I<<1) + (r << 4)
+  dst = smem + (((rr ^ 2) & 1) * (r << 6))
+
+Each tx lane issues:
+
+  32B to dst+00 from src+0B
+  32B to dst+32 from src+1024B
+
+Unit:
+
+  r << 4 = 16 u32 = 64B
+  32B = 8 u32 = 4 original-i rows of S13
+  +1024B = +256 u32 = +128 original-i rows of S13
+
+k0 / rr05:
 
   hp = kt+1
-
-Source:
-
-  S13 + hp*(I<<1) + (r << 4)
-
-Since S13 pointer is u32:
-
-  r << 4 = 16 u32 = 64B per rank
-  tx size = 32B = 8 u32
-  S13 per original i = 2 u32
-  32B tx = 4 original i
-
-Two tx rows:
-
-  row0 src = 16*r u32
-  row1 src = 16*r u32 + 256 u32     // +1024B
-
-Source horizontal:
-
-  row0:
-    r00 i000..003 | r01 i008..011 | r02 i016..019 | ... | r31 i248..251
-
-  row1:
-    r00 i128..131 | r01 i136..139 | r02 i144..147 | ... | r31 i376..379
-
-Source issue:
-
-  row0 has 4i gaps between ranks:
-    r00 covers i000..003, r01 covers i008..011, ...
-
-  row1(r00..15) overlaps row0(r16..31):
-    row1 r00 i128..131 == row0 r16 i128..131
-    row1 r01 i136..139 == row0 r17 i136..139
-    ...
-
-Destination:
-
-  smem + (((rr ^ 2) & 1) * (r << 6))
-
-For rr=5:
-
-  ((5 ^ 2) & 1) = 1
   dst = smem + r*64
 
-Destination horizontal:
+  row0 source:
+    r00 i000..003 | r01 i008..011 | r02 i016..019 | ... | r31 i248..251
 
-  r00 -> smem+0000 row0, smem+0032 row1
-  r01 -> smem+0064 row0, smem+0096 row1
-  ...
-  r31 -> smem+1984 row0, smem+2016 row1
+  row1 source:
+    r00 i128..131 | r01 i136..139 | r02 i144..147 | ... | r31 i376..379
 
-Bank map:
+  dst:
+    r00 smem+0000/0032 | r01 smem+0064/0096 | ... | r31 smem+1984/2016
+
+k1 / rr06:
+
+  hp = kt+0
+  ((6 ^ 2) & 1) = 0
+  dst = smem + 0 for every rank
+
+  row0 source:
+    r00 i000..003 | r01 i008..011 | ... | r31 i248..251
+
+  row1 source:
+    r00 i128..131 | r01 i136..139 | ... | r31 i376..379
+
+  dst:
+    all r -> smem+0000/0032
+
+Post-k S13 final image:
+
+  smem+0000/0032:
+    written by rr05 r00 hp=kt+1
+    written by rr06 r00..31 hp=kt+0
+    repeated again for rri=4
+    => address alias with different src
+
+  smem+0064..2047:
+    written by rr05 r01..31 hp=kt+1
+    repeated for rri=4 with same src
+    => rank-pair layout exists only for kt+1, ranks 01..31
+
+S13 bank map if consuming rr05 rank layout:
 
   even r:
     row0 banks 00..07
@@ -242,9 +268,9 @@ Bank map:
 
 S13 verdict:
 
-  dst shape is good for rank-pair consumer.
-  source has gaps/overlap if interpreted as a unique S13 tile.
-  rri loop repeats the same S13 tx twice.
+  rr05 dst is bank-clean for post-loop rank-pair consumer.
+  rr06 collapses into smem+0 and corrupts/aliases the first S13 row.
+  source still has 4i gaps and row1 overlaps row0(r16..31).
 
 
 M13 tx map
@@ -252,81 +278,89 @@ M13 tx map
 
 Predicate:
 
-  rr == 4 or rr == 6
-
-Panel:
-
-  rr4 -> hp=kt+0
-  rr6 -> hp=kt+0
-
-Source:
-
-  M13 + hp*(I<<2) + ((rr / 6) * (r << 4))
-
-Integer rr/6:
-
-  rr4 / 6 = 0
-  rr6 / 6 = 1
+  rr == 4+k or rr == 4+k+2
 
 Thus:
 
-  rr4 src = 0
-  rr6 src = r << 4 u32
+  k0 -> rr04 + rr06
+  k1 -> rr05 + rr07
 
-M13 row size:
+Formula:
 
-  tx size = 32B = 8 u32
-  M13 per original i = 4 u32
-  32B tx = 2 original i
-
-Source horizontal:
-
-  rr4 row0:
-    all ranks -> i000..001
-
-  rr4 row1 = row0 + 1024B = +256 u32 = +i64:
-    all ranks -> i064..065
-
-  rr6 row0:
-    r00 i000..001 | r01 i004..005 | r02 i008..009 | ... | r31 i124..125
-
-  rr6 row1:
-    r00 i064..065 | r01 i068..069 | r02 i072..073 | ... | r31 i188..189
-
-Destination:
-
-  smem + 4096 + (((rr ^ 2) & 1) * (rr / 6) * (r << 6))
-
-For rr4:
-
-  ((4 ^ 2) & 1) = 0
-  rr/6 = 0
+  src = M13 + hp(rr)*(I<<2) + ((rr / 6) * (r << 4))
   dst = smem + 4096
+      + (((rr ^ 2) & 1) * (rr / 6) * (r << 6))
 
-For rr6:
+Integer buckets:
 
-  ((6 ^ 2) & 1) = 0
-  rr/6 = 1
-  dst = smem + 4096
+  rr04: hp=kt+0, rr/6=0, parity=0
+  rr05: hp=kt+1, rr/6=0, parity=1
+  rr06: hp=kt+0, rr/6=1, parity=0
+  rr07: hp=kt+1, rr/6=1, parity=1
 
-Destination horizontal:
+Each tx lane issues:
 
-  rr4 r00..31 -> smem+4096 row0, smem+4128 row1
-  rr6 r00..31 -> smem+4096 row0, smem+4128 row1
+  32B to dst+00 from src+0B
+  32B to dst+32 from src+1024B
 
-Bank map:
+Unit:
 
-  row0 banks 00..07
-  row1 banks 08..15
+  r << 4 = 16 u32 = 64B
+  32B = 8 u32 = 2 original-i rows of M13
+  +1024B = +256 u32 = +64 original-i rows of M13
+
+Horizontal:
+
+  rr04:
+    src all r -> hp kt+0, i000..001 and i064..065
+    dst all r -> smem+4096/4128
+
+  rr05:
+    src all r -> hp kt+1, i000..001 and i064..065
+    dst all r -> smem+4096/4128
+
+  rr06:
+    src r00 i000..001 | r01 i004..005 | ... | r31 i124..125
+    row1 +i64
+    dst all r -> smem+4096/4128
+
+  rr07:
+    src r00 i000..001 | r01 i004..005 | ... | r31 i124..125
+    row1 +i64
+    dst r00 smem+4096/4128 | r01 smem+4160/4192 | ... | r31 smem+6080/6112
+
+Post-k M13 final image:
+
+  smem+4096/4128:
+    rr04 all ranks hp=kt+0 constant src
+    rr05 all ranks hp=kt+1 constant src
+    rr06 all ranks hp=kt+0 rank-varying src
+    rr07 r00 hp=kt+1 rank0 src
+    repeated again for rri=4
+    => address alias with different src
+
+  smem+4160..6143:
+    rr07 r01..31 hp=kt+1 rank layout
+    repeated for rri=4 with same src
+    => rank-pair layout exists only for kt+1 rr07 tail
+
+M13 bank map:
+
+  collapsed smem+4096/4128:
+    row0 banks 00..07
+    row1 banks 08..15
+    but many lanes/ranks write same address
+
+  rr07 rank layout:
+    same rank*64 pattern:
+      even r -> row0 00..07, row1 08..15
+      odd  r -> row0 16..23, row1 24..31
 
 M13 verdict:
 
-  as written, M13 dst collapses to one 64B location.
-  rr4 duplicates same source for all ranks.
-  rr6 varies source by rank but overwrites same dst.
-  rri loop repeats the same M13 tx twice.
-
-This is not a subtle bank-conflict issue; it is address aliasing.
+  rr07 tail has a bank-clean post-loop rank layout.
+  rr04/rr05/rr06 collapse into smem+4096.
+  final first M13 row is aliased across hp and rank.
 
 
 W13 tx map
@@ -336,12 +370,38 @@ Predicate:
 
   rr >= 16
 
-Define:
+For both k=0 and k=1:
 
-  local  = ((rr ^ 16) & 15)
-  parity = ((rr ^ 2) & 1) = rr & 1
+  same predicate
+  same src formula
+  same dst formula
 
-Horizontal lane map:
+Therefore:
+
+  W13 tx repeats for k0 and k1.
+  Since rri also repeats, W13 tx map is issued 4x per kt.
+
+Formula:
+
+  local  = ((rr ^ 16) & 15) = rr - 16
+  parity = ((rr ^ 2) & 1)  = rr & 1
+
+  src = W13 + hp(rr)*(I<<4) + (local * (r << 4))
+  dst = smem + 12288 + (parity * local * (r << 5))
+
+Unit:
+
+  local * (r << 4) = local*r*16 u32
+  tx size = 32B = 8 u32
+  W13 per i = 16 u32 = 64B
+
+Thus current W13 tx copies only:
+
+  W1 half of W13 i = local*r
+
+because it starts on a 16-u32 boundary and copies 8 u32.
+
+Lane map:
 
   rr16 local00 parity0 hp=kt+0
   rr17 local01 parity1 hp=kt+1
@@ -351,228 +411,182 @@ Horizontal lane map:
   rr30 local14 parity0 hp=kt+0
   rr31 local15 parity1 hp=kt+1
 
-Source:
-
-  W13 + hp*(I<<4) + (local * (r << 4))
-
-Since W13 pointer is u32:
-
-  local * (r << 4) = local*r*16 u32
-
-W13 tx size:
-
-  tx size = 32B = 8 u32
-  per original i / W13 = 16 u32
-
-Therefore each W13 tx currently lands only one 32B half of a W13 i-record.
-With offset multiple of 16 u32, it starts at u32 00 of that i-record:
-
-  current W13 tx = W1-side 32B of original i = local*r
-
-No current +32B / +8u32 second half exists for W3 in the W13 tx.
-
 Source horizontal:
 
-  even rr, hp=kt+0:
-    rr16 local00 -> all r source i000
+  even rr / hp kt+0:
+    rr16 local00 -> all r i000
     rr18 local02 -> r00 i000 | r01 i002 | r02 i004 | ...
     rr20 local04 -> r00 i000 | r01 i004 | r02 i008 | ...
     ...
 
-  odd rr, hp=kt+1:
+  odd rr / hp kt+1:
     rr17 local01 -> r00 i000 | r01 i001 | r02 i002 | ...
     rr19 local03 -> r00 i000 | r01 i003 | r02 i006 | ...
     rr21 local05 -> r00 i000 | r01 i005 | r02 i010 | ...
     ...
 
-Destination:
-
-  smem + 12288 + (parity * local * (r << 5))
-
-Since r<<5 = r*32B:
+Destination horizontal:
 
   even rr:
     parity=0
-    dst = smem + 12288
+    all even lanes, all ranks -> smem+12288
 
   odd rr:
-    parity=1
-    dst = smem + 12288 + local*r*32B
+    dst = smem+12288 + local*r*32B
 
-Destination horizontal:
-
-  even lanes:
-    rr16,18,20,22,24,26,28,30 all ranks -> smem+12288
-
-  odd lanes:
     rr17 local01 -> r00 +0000 | r01 +0032 | r02 +0064 | ...
     rr19 local03 -> r00 +0000 | r01 +0096 | r02 +0192 | ...
     rr21 local05 -> r00 +0000 | r01 +0160 | r02 +0320 | ...
     ...
     rr31 local15 -> r00 +0000 | r01 +0480 | r02 +0960 | ...
 
-Collision examples:
+Post-k W13 final image:
+
+  smem+12288:
+    all even rr/r write here
+    all odd rr/r00 also write here
+    repeated for k0,k1,rri0,rri4
+    => heavy alias with different src
+
+  odd product rows:
+    product alias examples:
+      local01*r03 == local03*r01 == 3
+      local01*r05 == local05*r01 == 5
+      local03*r05 == local15*r01 == 15
+
+    so odd lanes are not unique either.
+
+W13 bank map:
 
   even rr:
-    everything aliases smem+12288
-
-  odd rr:
-    r00 aliases for all odd lanes:
-      local*r = 0
-
-    product aliases:
-      rr17 r03 -> local*r = 1*3 = 3
-      rr19 r01 -> local*r = 3*1 = 3
-
-      rr17 r05 -> 1*5 = 5
-      rr21 r01 -> 5*1 = 5
-
-      rr19 r05 -> 3*5 = 15
-      rr31 r01 -> 15*1 = 15
-
-Bank map:
-
-  bank_start = ((12288 + local*r*32B) >> 2) & 31
-             = (8*local*r) & 31
-
-  even rr:
-    dst fixed at 12288
     row banks 00..07 for every active even lane/rank
 
-  odd rr by rank mod 4:
-    r % 4 = 0 -> bank_start 00 for all odd local
-    r % 4 = 1 -> bank_start alternates 08,24,08,24,...
-    r % 4 = 2 -> bank_start 16 for all odd local
-    r % 4 = 3 -> bank_start alternates 24,08,24,08,...
+  odd rr:
+    bank_start = (8*local*r) & 31
+
+    r%4=0 -> bank_start 00 for all odd local
+    r%4=1 -> bank_start alternates 08,24,08,24...
+    r%4=2 -> bank_start 16 for all odd local
+    r%4=3 -> bank_start alternates 24,08,24,08...
 
 W13 verdict:
 
-  as written, W13 dst has heavy aliasing.
-  source is a product tile, not the full rank stripe.
-  W13 tx only stages the W1 half of each i-record.
-  rri loop repeats the same W13 tx twice.
+  source is covered by full-panel L2 prefetch, but it is not the rank stripe.
+  final smem image aliases heavily.
+  only W1 half is staged.
+  post-k consumer cannot interpret this as a clean W13 tile yet.
 
 
-What is actually SOL here
--------------------------
+Post-k consumer bank board
+--------------------------
 
-The interweave concept is good:
+Good final-layout pattern:
 
-  rr00/01:
-    large W13 L2 prefetch, full H256 unit
+  dst = base + r*64 + row
 
-  rr02/03:
-    M13/S13 L2 prefetch sideband
+Then:
 
-  rr04/05/06:
-    sideband smem tx lanes after L2 warmup
+  even r:
+    row0 banks 00..07
+    row1 banks 08..15
 
-  rr16..31:
-    W13 smem tx lanes after W13 L2 warmup
+  odd r:
+    row0 banks 16..23
+    row1 banks 24..31
 
-  wait_group:
-    pacing / issue-spacing gate
+Post-loop rank-pair consumer:
 
-  rr sync:
-    same-lane group ordering point
+  lane 00..07 -> even r row0 -> banks 00..07
+  lane 08..15 -> even r row1 -> banks 08..15
+  lane 16..23 -> odd  r row0 -> banks 16..23
+  lane 24..31 -> odd  r row1 -> banks 24..31
 
-What is not SOL yet as written:
+=> this is bank-clean.
 
-  rri only gates wait_group, not tx.
-  M13 dst collapses.
-  W13 dst aliases.
-  S13 source has gaps/overlap.
-  W13 tx stages only 32B of a 64B W13 i-record.
+Where current code has that shape:
+
+  S13 rr05, all ranks, hp kt+1
+  M13 rr07, ranks 01..31, hp kt+1
+
+Where current code breaks post-k final layout:
+
+  S13 rr06 collapses to smem+0
+  M13 rr04/rr05/rr06 collapse to smem+4096
+  W13 even lanes collapse to smem+12288
+  W13 odd lanes use product local*r and alias
+
+So the bank conflict answer depends on the object:
+
+  issue-time:
+    there are same-address writes in M13/W13 active lanes.
+
+  post-k consumption:
+    rank*64 row-pair regions are bank-clean.
+    collapsed/product regions are not valid final tiles, so bank analysis is secondary to address aliasing.
 
 
-Minimal invariant to make the board trackable
----------------------------------------------
+Indexing conclusion
+-------------------
 
-Every smem tx needs these axes separated:
+Confirmed good:
+
+  rr mapping:
+    rr = lane, r = warp/rank
+
+  L2 prefetch:
+    W13 rr00/01 covers full H256 panel
+    M13/S13 rr02/03 cover full H256 sideband
+
+  Interleave intent:
+    producer lane does not need to equal tx lane;
+    L2 is the rendezvous;
+    consumption post-k is the right mental model.
+
+Not in order yet:
+
+  rri only gates wait_group and does not create distinct tx tiles.
+
+  k creates distinct S13/M13 lanes, but the parity formula makes:
+    rr06 S13 dst collapse
+    rr04/05/06 M13 dst collapse
+
+  W13 tx has no k/rri distinction and repeats same map 4x.
+
+  W13 dst uses parity*local*r, causing collapse/product aliases.
+
+  W13 src stages only 32B W1 half, not full W13 i-record.
+
+
+Minimal next indexing invariant
+-------------------------------
+
+For post-k consumption, each final tile needs additive axes:
 
   dst = base
-      + stream_bucket_offset
-      + lane_subtile_offset
-      + rank_offset
-      + row_offset
+      + hp_bucket
+      + stream_bucket
+      + lane_subtile
+      + r*rank_stride
+      + row
 
   src = panel_base
-      + prefetch_panel_offset
-      + lane_subtile_offset
-      + rank_offset
-      + row_offset
+      + hp_panel
+      + lane_subtile
+      + r*rank_src_stride
+      + row
 
-Do not hide two logical axes inside:
+If rri is intended to create multiple beats:
 
-  lane * rank
+  rri must enter src/dst,
+  or the tx predicate must be limited to elected ranks.
 
-unless product aliasing is explicitly intended.
+If k is intended to separate kt+0 / kt+1 final tiles:
 
-If rri is meant to make two different beats:
+  k/hp must enter dst as an additive bucket.
 
-  rri must enter tx src/dst
-  or tx predicate must be gated by elected rank
+Do not use:
 
-Current code only uses rri for wait election, so it cannot create two unique
-tx beats yet.
+  parity * bucket * r
 
-
-Clean horizontal target shape
------------------------------
-
-The map becomes easy if each stage looks like this:
-
-  rr lane bucket | hp | subtile | r00 | r01 | ... | r31
-
-Example form, not a patch:
-
-  S13:
-    rr05 hp=kt+1 subtileA:
-      r00 dst A+0000 | r01 dst A+0064 | ... | r31 dst A+1984
-
-  M13:
-    rr04 hp=kt+0 subtileA:
-      r00 dst B+0000 | r01 dst B+0064 | ... | r31 dst B+1984
-
-    rr06 hp=kt+0 subtileB:
-      r00 dst B+2048 | r01 dst B+2112 | ... | r31 dst B+4032
-
-  W13:
-    rr16..31 should produce additive lane buckets, not product buckets:
-      base + lane_bucket + rank_stride + row
-
-Bank-clean consumer rule:
-
-  rank-pair / row-pair is good:
-
-    lane 00..07 -> even rank row0 -> banks 00..07
-    lane 08..15 -> even rank row1 -> banks 08..15
-    lane 16..23 -> odd  rank row0 -> banks 16..23
-    lane 24..31 -> odd  rank row1 -> banks 24..31
-
-  component-across-ranks is bad:
-
-    lane k -> smem + k*64 + const
-    => 16-way bank-hot
-
-
-Bottom line
------------
-
-The interweaving idea is right:
-
-  L2 full-panel warmup first,
-  smaller staged smem tx later,
-  rr lanes used as temporal issue fabric.
-
-The current formulas do not yet encode the intended unique tile:
-
-  rri is missing from tx maps,
-  M13/W13 have dst aliasing,
-  S13 source still overlaps/gaps,
-  W13 currently copies only one 32B projection half.
-
-So the next step is not "more bank work".
-The next step is to choose the exact additive src/dst tile axes for S13/M13/W13,
-then recompute banks from that tile.
+unless the zero-parity collapse and product aliasing are intended.
 
