@@ -103,7 +103,7 @@ __global__ void kernel(
                     ) {
                         if ((!rr32x32.thread_rank())) {
                             asm volatile(
-                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 _, [%0], 64;
+                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 _, [%0], 64;"
                                 ::
                                 "r"((uint32_t)__cvta_generic_to_shared(mbar + 1))
                             );
@@ -115,7 +115,7 @@ __global__ void kernel(
                     ) {
                         if ((!rr32x32.thread_rank())) {
                             asm volatile(
-                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 _, [%0], 128;
+                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 _, [%0], 128;"
                                 ::
                                 "r"((uint32_t)__cvta_generic_to_shared(mbar + 2))
                             );
@@ -143,7 +143,7 @@ __global__ void kernel(
 
                     if ((!rr32x32.thread_rank())) {
                             asm volatile(
-                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 state, [%0], 16;
+                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 state, [%0], 16;"
                                 ::
                                 "r"((uint32_t)__cvta_generic_to_shared(mbar))
                             );
