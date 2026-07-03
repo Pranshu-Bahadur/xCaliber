@@ -143,7 +143,7 @@ __global__ void kernel(
 
                     if ((!rr32x32.thread_rank())) {
                             asm volatile(
-                                "mbarrier.arrive_drop.expect_tx.shared::cta.relaxed.cluster.b64 state, [%0], 16;
+                                "mbarrier.arrive_drop.expect_tx.shared::cta.release.b64 state, [%0], 16;
                                 ::
                                 "r"((uint32_t)__cvta_generic_to_shared(mbar))
                             );
@@ -296,7 +296,7 @@ __global__ void kernel(
                 }
             }
 
-            
+
         }
     }
 }
