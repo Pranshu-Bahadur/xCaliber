@@ -13,6 +13,3 @@ This repo is the spiritual successor to "4Bit-Forge", our goal is to further ass
 - [Colfax CUTLASS NVFP4 blockscaled GEMM tutorial](https://research.colfax-intl.com/cutlass-tutorial-nvfp4-blockscaled-gemm-on-nvidia-rtx-pro-blackwell-gpus-sm12x/): CTA=256 NVFP4/tmem reference point.
 - [arXiv 2505.11594](https://arxiv.org/pdf/2505.11594): paper ref from `notes.md`.
 - [arXiv 2603.07685](https://arxiv.org/pdf/2603.07685): W4A4 -> SwiGLU/topk -> W4A16 direction.
-
-
-Note: The software under the same Apache 2.0 License (signed by me, Pranshu Bahadur) has been moved from IST-DASlab organization's repo to this repo.

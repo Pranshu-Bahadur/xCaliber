@@ -126,14 +126,14 @@ __global__ void kernel(
 
                     if (threadIdx.x & 1) {
                          asm volatile(
-                            "ld.shared.b32 %0, %1;\n\t"
+                            "ld.shared.acquire.b32 %0, %1;\n\t"
                             :"r"((uint32_t)(rmem + 1 + ((k - 1) * 6))),
                             :"r"((uint32_t)__cvta_generic_to_shared(smem + (threadIdx.x >> 1)))
                         );
                     }
 
                     asm volatile(
-                            "ld.shared.b32 %0, %1;\n\t"
+                            "ld.shared.acquire.b32 %0, %1;\n\t"
                             :"r"((uint32_t)(rmem + 2 + ((k - 1) * 6))),
                             :"r"((uint32_t)__cvta_generic_to_shared(smem + 2048 + threadIdx.x))
                     );
@@ -151,7 +151,7 @@ __global__ void kernel(
                     __syncthreads();
 
                     asm volatile(
-                            "ld.shared.v4.b32 %0, %1;\n\t"
+                            "ld.shared.acquire.v4.b32 %0, %1;\n\t"
                             :"r"((uint32_t)(rmem + 3 + ((k - 1) * 6))),
                             :"r"((uint32_t)__cvta_generic_to_shared(smem + 6144 + threadIdx.x))
                     );
