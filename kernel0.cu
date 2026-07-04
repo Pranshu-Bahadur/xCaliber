@@ -5,18 +5,8 @@ using namespace cg = cooperative_groups;
 //CTA=1024 (1 CTA = 1 SM = 1 cluster)
 //@TODO profile vs 2SM / cluster (W1, W3 variant)
 __global__ void kernel(
-		        const uint32_t* __restrict__ W13, //[E, (H + 127) >> 7, I << 4]
-                /*
-                    0 w1-i0-h015, w1-i0-h1631, w1-i0-h3247, w1-i0-h4863, ..., 127, (8),  w3-i0-h015, w3-i0-h1631, w3-i0-h3247, w3-i0-h4863, ..., repeat pattern until I
-                    1 128-255
-                    2 256-383
-                    3 384-511
-                    .
-                    .
-                    . repeat until H / 128
-                */
-                const uint32_t* __restrict__ M13, //[E, (H + 127) >> 7, I << 2]
-                const uint32_t* __restrict__ S13, //[E, (H + 127) >> 7, I << 1]
+		        const uint32_t* __restrict__ W13, //[E, (H + 127) >> 7, I << 5]
+                const uint32_t* __restrict__ S13, //[E, (H + 127) >> 7, I << 2]
                 const __nv_bfloat16* __restrict__ W13GS, //[E, 2]
                 const uint32_t* __restrict__ X4, //[N, H >> 3]
                 const uint32_t* __restrict__ SX, //[N, H >> 7]
@@ -37,7 +27,7 @@ __global__ void kernel(
 
 	uint32_t rmem[48]; //16 32-bit for indexing
 	__shared__ alignas(16) uchar smem[32768]; //32768B : 98304B
-    __shared__ alignas(16) uint64_t mbar[5];
+    __shared__ alignas(16) uint64_t mbar[4];
 
     if (!((threadIdx.x ^ 4) & 3)){
 		rmem[0] = Xb[(int64_t)(blockIdx.x * (8 + ((N + 31) >> 5)) + (((threadIdx.x ^ 32) & 31) >> 2))];
@@ -58,15 +48,15 @@ __global__ void kernel(
 
 	for (int kt = 0; kt < (H >> 8); kt += 2) {
 
-        if (rr32x32.meta_group_rank() < 2) {
+        if (rr32x32.meta_group_rank() < 4) {
             asm volatile(            
                      	"cp.async.bulk.prefetch.L2.global.L2::evict_last [%0], 4096;\n\t"
                         "cp.async.bulk.commit_group;\n\t"
                         ::"l"(
                                 (uint64_t)__cvta_generic_to_global(
                                 W13
-                                + (int64_t)(blockIdx.x * (H >> 7) * (I << 4))
-                                + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1))) * (I << 4))
+                                + (int64_t)(blockIdx.x * (H >> 7) * (I << 5))
+                                + (int64_t)((kt + ((rr32x32.meta_group_rank() ^ 2) & 1))) * (I << 5))
                                 + (rr32x32.thread_rank() << 10)
                             )
                         ),
