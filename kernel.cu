@@ -98,7 +98,9 @@ __global__ void kernel(
                             )
                         ),
                         "n"((uint32_t)(I)) //@TODO add condition based bytes calc (for tail of each panel)
-                        "n"((uint32_t)(I >> 1))
+                        "n"(
+                            (uint32_t)(I >> 1)
+                        )
 			);
         }
 
