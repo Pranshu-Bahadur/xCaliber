@@ -1,4 +1,4 @@
-# xCaliber
+# xCalibrr
 
 <img src="xRR48.png" alt="xCaliber xRR48 view" width="720">
 

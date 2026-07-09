@@ -1,0 +1,25 @@
+gpu,NVIDIA RTX PRO 6000 Blackwell Server Edition
+sms,188
+blocks,384
+threads,1024
+groups,384
+iters,32
+n32,16
+h_panels,8
+window_bytes,131072
+token_window_bytes,4096
+live_per_n32,24
+mask_mode,2
+x_bytes,6442450944
+logical_bytes,19327352832
+mode_table,0=no pf,1=pf current no wait,2=pf current wait0,3=pf lead1 no wait,4=pf lead2 no wait,5=pf lead4 no wait,6=pf lead8 no wait,7=pf256 lead4 no wait,8=pf128 lead4 wait0
+kind,mode,mode_name,blocks,groups,iters,n32,live_per_n32_counted,mask_mode,ms,GBps,median_cyc,cyc_per_step,cyc_per_live_token,sink
+throughput,0,no_pf,384,384,32,16,24,2,39.03411,495.140,43953063,85845.826,3576.909,0x00000000
+throughput,1,pf128_current_no_wait,384,384,32,16,24,2,13.01763,1484.706,14339245,28006.338,1166.931,0x00000000
+throughput,2,pf128_current_wait0,384,384,32,16,24,2,12.77270,1513.176,14278936,27888.547,1162.023,0x00000000
+throughput,3,pf128_lead1_no_wait,384,384,32,16,24,2,13.61341,1419.729,14213600,27760.938,1156.706,0x00000000
+throughput,4,pf128_lead2_no_wait,384,384,32,16,24,2,13.46323,1435.566,13946256,27238.781,1134.949,0x00000000
+throughput,5,pf128_lead4_no_wait,384,384,32,16,24,2,13.78493,1402.064,14740466,28789.973,1199.582,0x00000000
+throughput,6,pf128_lead8_no_wait,384,384,32,16,24,2,35.98829,537.046,40677018,79447.301,3310.304,0x00000000
+throughput,7,pf256_lead4_no_wait,384,384,32,16,24,2,28.30317,682.869,32953392,64362.094,2681.754,0x00000000
+throughput,8,pf128_lead4_wait0,384,384,32,16,24,2,13.34538,1448.243,15159942,29609.262,1233.719,0x00000000

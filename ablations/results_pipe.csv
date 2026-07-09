@@ -1,0 +1,17 @@
+gpu,NVIDIA RTX PRO 6000 Blackwell Server Edition
+sms,188
+blocks,384
+threads,1024
+data_mb,1024
+tensor_panel_bytes,131072
+tma_chunk_bytes,32768
+panels_per_iter,8
+pf_groups,7
+pf_panels_per_group,1
+mode_table,0=mode23 style two L2::64B hint planes plus six cs.nc planes,1=7 all-thread 128KB L2 prefetch groups then wait_group 2 then 8 coalesced cs.nc planes,2=TMA as 4x32KB chunks to SMEM then 8 coalesced shared-load planes,3=pure 8x16B coalesced cs.nc planes,4=one coalesced 16B ld.global.nc.L2::128B plane then 7 coalesced 16B cs.nc planes
+kind,mode,mode_name,blocks,threads,iters,data_mb,panels_per_iter,panel_bytes,ms,GBps,median_cyc,cyc_per_panel,cyc_per_thread_load,sink
+throughput,0,mode23_2xp64_then_cs_nc_8x16B_coal,384,1024,128,1024,8,131072,32.32512,1594.414,35711001,34874.024,4359.253,0x00000000
+throughput,1,bulkpf7_wait2_then_cs_nc_8x16B_coal,384,1024,128,1024,8,131072,34.53056,1492.580,36813772,35950.949,4493.869,0x00000000
+throughput,2,tma4x32KB_then_ld_shared_8x16B_coal,384,1024,128,1024,8,131072,32.38400,1591.515,32762321,31994.454,3999.307,0x00000000
+throughput,3,pure_cs_nc_8x16B_coal,384,1024,128,1024,8,131072,32.19776,1600.720,35855340,35014.980,4376.873,0x00000000
+throughput,4,p128_once_then_7x_cs_nc_8x16B_coal,384,1024,128,1024,8,131072,31.53302,1634.464,34321111,33516.710,4189.589,0x00000000
