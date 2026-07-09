@@ -6,7 +6,7 @@ __global__ void kernel(
                 const __nv_bfloat16* __restrict__ W13GS, //[E, 2]
                 const __nv_bfloat16* __restrict__ X, //[N, H] <-atomicAdd
                 const __nv_bfloat16 __restrict__ XGSINV,
-                const int32_t* __restrict__ Xb, //[E, 8 + (N + 31) >> 5] bitplanes
+                const int32_t* __restrict__ Xb, //[E, 1 + (N + 31) >> 5] bitplanes
                 const __nv_bfloat16* __restrict__ topk_W, //[N, TOPK] @TODO multiply to partials
                 __nv_bfloat16* Y, //[I, N]
                 const int32_t E,
@@ -21,10 +21,18 @@ __global__ void kernel(
 	__shared__ alignas(16) unsigned char smem[32768]; //32768B : 98304B
     __shared__ alignas(16) uint64_t mbar[5];
 
-    if (!((threadIdx.x ^ 4) & 3)){
-		rmem[0] = Xb[(int64_t)(blockIdx.x * (8 + ((N + 31) >> 5)) + (((threadIdx.x ^ 32) & 31) >> 2))];
-	}
-	rmem[0] = __shfl_sync(0xFFFF'FFFF, rmem[0], 0, 4);
+    asm volatile(
+                    "ldu.global.u32 %0, [%1];\n\t"
+                    :
+                    "=r"(rmem),
+                    :
+                    "l"(
+                            (uint64_t)__cvta_generic_to_global(
+                            Xb + (blockIdx.x * (1 + (N + 31) >> 5))
+                        )
+                    )
+                );
+
 	if (!__popc(rmem[0])) return;
 
 	if (!(threadIdx.x & 31) && ((threadIdx.x >> 5) < 5)) {
@@ -41,7 +49,6 @@ __global__ void kernel(
 	for (int kt = 0; kt < (H >> 6); kt++) {
 
         for (int i = 0; i < ((I << 5) >> 8); i++) {
-
 
             asm volatile(
                 "ld.global.nc.ca.L2::64B.b128 %0, [%20];"
@@ -87,20 +94,40 @@ __global__ void kernel(
             for (int n256 = 0; n256 < ((N + 31) >> 5) >> 3; n256++) {
                 
                 // load using + 8 offset next Xb panel each warp within 256 threads loads 1 packet
+
+                asm volatile(
+                    "ldu.global.u32 %0, [%1];\n\t"
+                    :
+                    "=r"(rmem),
+                    :
+                    "l"(
+                            (uint64_t)__cvta_generic_to_global(
+                            Xb + (blockIdx.x * (1 + (N + 31) >> 5)) + (((threadIdx.x >> 5) ^ 8) & 7) + (n256 << 3)
+                        )
+                    )
+                );
+
+                //gpu-wide prefetch
                 
                 asm volatile(
                     "cp.async.bulk.prefetch.L2.global [%0], 128;\n\t"
                     "cp.async.bulk.commit_group;"
                     :
-                    : "l"(
+                    :
+                    "l"(
                         (uint64_t)__cvta_generic_to_global(
-                        X + (n32 << 5) + (threadIdx.x)
-                    ))
-                    : "memory"
+                        X 
+                        + (((n256 << 8) + (threadIdx.x ^ 256) & 255) * (H >> 1))
+                        + (kt << 7) + (threadIdx.x >> 8))
+                    )
                 );
 
-                
-                
+                rmem[0] = ((1u >> ((uint32_t)((threadIdx.x ^ 32) & 31))) & rmem[0]);
+
+                //@TODO lut
+
+                //ld bf16 scattered compression / smem distribute compression
+
 
             }    
 
