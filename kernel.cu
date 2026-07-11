@@ -52,10 +52,10 @@ __global__ void kernel(
 
             //@TODO need to clear the L2 pressure
             asm volatile(
-                "ld.global.nc.ca.L2::64B.b128 %0, [%20];"
-                "ld.global.nc.L1::evict_first.b128 %1, [%20 + 16384];"
-                "ld.global.nc.L1::evict_first.b128 %2, [%20 + 32768];"
-                "ld.global.nc.L1::evict_first.b128 %3, [%20 + 49152];"
+                "ld.global.nc.cs.L2::64B.b128 %0, [%20];"
+                "ld.global.nc.cs.b128 %1, [%20 + 16384];"
+                "ld.global.nc.cs.b128 %2, [%20 + 32768];"
+                "ld.global.nc.cs.b128 %3, [%20 + 49152];"
                 :
                 "=r"(&(rmem + 1)), 
                 "=r"(&((rmem + 1) << 2)), 
@@ -70,10 +70,10 @@ __global__ void kernel(
             );
             if (!((threadIdx.x ^ 4) & 3)) {
                 asm volatile(
-                    "ld.global.nc.ca.b32 %0, [%1];"
-                    "ld.global.nc.ca.b32 %1, [%1 + 2048];"
-                    "ld.global.nc.ca.b32 %2, [%1 + 4096];"
-                    "ld.global.nc.ca.b32 %3, [%1 + 6144];"
+                    "ld.global.nc.cs.b32 %0, [%1];"
+                    "ld.global.nc.cs.b32 %1, [%1 + 1024];" //@TODO its 16 weight packets per 1 scale packet, this might be off
+                    "ld.global.nc.cs.b32 %2, [%1 + 2048];" //@TODO depends on whether the layout is going to be interleaved intra I128
+                    "ld.global.nc.cs.b32 %3, [%1 + 3072];" //might need 2 distinct scales w1 / w3 
                     :
                     "=r"(&(rmem + 17)),
                     "=r"(&(rmem + 18)),
