@@ -1,6 +1,9 @@
 # xCaliber dense FF1 notes (by the homie Sol)
 ---
 
+Team entry point: [`co-design.md`](co-design.md). This file is the deep board
+for fragment math, physical layouts, bank maps, experiments, and lineage.
+
 ![Dense K64 CTA1024 wireframe](assets/notes/dense-k64-cta1024-wireframe.png)
 
 Visuals orient. ASCII + PTX maps remain the contract.

@@ -4,8 +4,10 @@
 
 This repo is the spiritual successor to "4Bit-Forge", our goal is to further assist open source efforts to democratize the inference of LLMs.
 
-The live architecture, experiment history, and open board are maintained in
-[`notes.md`](notes.md).
+Start with [`co-design.md`](co-design.md) for the team-facing architecture,
+selected calls, open forks, and next milestone. Deep fragment/layout work and
+decision history remain in [`notes.md`](notes.md); measured activation results
+live in [`experiments/README.md`](experiments/README.md).
 
 ## References (To be formalized)
 
