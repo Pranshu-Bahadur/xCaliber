@@ -1,5 +1,5 @@
 //CTA=1024 (1 CTA = 1 SM = 1 cluster)
-//@TODO profile vs 2SM / cluster (W1, W3 variant)
+
 __global__ void kernel(
 		        const uint32_t* __restrict__ W13, //[E, (H + 63) >> 6, I << 5]
                 const uint32_t* __restrict__ S13, //[E, (H + 63) >> 6, I << 2]
@@ -7,7 +7,7 @@ __global__ void kernel(
                 const __nv_bfloat16* __restrict__ X, //[N, H] <-atomicAdd
                 const __nv_bfloat16 __restrict__ XGSINV,
                 const int32_t* __restrict__ Xb, //[E, 1 + (N + 31) >> 5] bitplanes
-                const __nv_bfloat16* __restrict__ topk_W, //[N, TOPK] @TODO multiply to partials
+                const __nv_bfloat16* __restrict__ topk_W, //[N, TOPK] @TODO multiply to partials 
                 __nv_bfloat16* Y, //[I, N]
                 const int32_t E,
                 const int32_t N,
@@ -50,6 +50,7 @@ __global__ void kernel(
 
         for (int i = 0; i < ((I << 5) >> 8); i++) {
 
+            //@TODO need to clear the L2 pressure
             asm volatile(
                 "ld.global.nc.ca.L2::64B.b128 %0, [%20];"
                 "ld.global.nc.L1::evict_first.b128 %1, [%20 + 16384];"
@@ -110,7 +111,7 @@ __global__ void kernel(
                 //gpu-wide prefetch
                 
                 asm volatile(
-                    "cp.async.bulk.prefetch.L2.global [%0], 128;\n\t"
+                    "cp.async.bulk.prefetch.L2.global [%0], 32;\n\t"
                     "cp.async.bulk.commit_group;"
                     :
                     :
