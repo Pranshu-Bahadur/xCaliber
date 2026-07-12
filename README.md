@@ -15,6 +15,7 @@ live in [`experiments/README.md`](experiments/README.md).
 - CUDA Programming Guide 13.3: CTA execution, memory transactions, coalescing, cache behavior.
 - [FlashInfer GDN decode pretranspose](https://github.com/flashinfer-ai/flashinfer/blob/v0.6.7/flashinfer/gdn_kernels/gdn_decode_pretranspose.py): layout / pretranspose reference.
 - [MLSys FlashLinfer Contest](https://github.com/mayankagarwals/MLSys-FlashLinfer-Contest): prefetch ideas and operand-A-in-tmem insight.
-- [Colfax CUTLASS NVFP4 blockscaled GEMM tutorial](https://research.colfax-intl.com/cutlass-tutorial-nvfp4-blockscaled-gemm-on-nvidia-rtx-pro-blackwell-gpus-sm12x/): CTA=256 NVFP4/tmem reference point.
+- [Colfax CUTLASS NVFP4 blockscaled GEMM tutorial](https://research.colfax-intl.com/cutlass-tutorial-nvfp4-blockscaled-gemm-on-nvidia-rtx-pro-blackwell-gpus-sm12x/): CTA=256 `mma.sync` + TMA reference point (SM12x has no TMEM).
 - [arXiv 2505.11594](https://arxiv.org/pdf/2505.11594): paper reference used by the co-design notes.
 - [arXiv 2603.07685](https://arxiv.org/pdf/2603.07685): W4A4 -> SwiGLU/topk -> W4A16 direction.
+- SonicMoE (1-hot encoding)

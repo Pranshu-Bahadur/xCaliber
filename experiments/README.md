@@ -1,9 +1,142 @@
 # Activation L2 Prefetch Experiment
 
-Pre-MMA activation transport probe for `kernel.cu` on the NVIDIA RTX PRO
-6000 Blackwell Server Edition.
+Activation transport lineage plus the full CTA1024 FF1 checkpoint for
+`kernel.cu` on the NVIDIA RTX PRO 6000 Blackwell Server Edition.
 
-## Final Call
+## Overall Winner - Paired No-Workspace N16
+
+```text
+loop       live n16 pair -> i1024 -> I256 plane -> H2048 panel -> k64
+reuse      one W13/S13 packet feeds up to four routed N8 MMAs
+partials   registers through H; no global W1/W3 partial workspace
+output     SwiGLU * topk_W -> BF16 cp.reduce directly into X[I,NP]
+staging    two dynamic 2*N16 activation stages; 77,824B max
+ptxas      58 registers; zero stack; zero spills; 1 CTA/SM
+```
+
+Corrected exact-live sweep:
+
+```text
+E=384 I=2048 H=7168 TOPK=8 seeds=3 repeats=20
+N8   live={8,64}
+N256 live={128,384}
+N512 live={128,384}
+18 rows; all PASS; equal output checksum
+```
+
+This table includes the final 2-entry literal `XbMaskLUT`.
+
+```text
++-----+------+----------+----------+---------+----------------+
+| N   | live | N16x2 ms | serial   | vs old  | vs partial-best|
++-----+------+----------+----------+---------+----------------+
+|   8 |    8 |    0.547 |    0.522 |   0.96x |          1.42x |
+|   8 |   64 |    0.780 |    0.770 |   0.99x |          1.14x |
+| 256 |  128 |   11.511 |   22.041 |   1.91x |          4.46x |
+| 256 |  384 |   13.976 |   23.373 |   1.67x |          5.60x |
+| 512 |  128 |   23.021 |   44.083 |   1.92x |          9.57x |
+| 512 |  384 |   25.955 |   47.062 |   1.81x |         10.84x |
++-----+------+----------+----------+---------+----------------+
+```
+
+Redundant-load call:
+
+```text
+serial W replay   active_n16/live_experts
+paired W replay   ceil(active_n16_per_expert/2)
+
+N256/live128      16x -> 8x
+N512/live128      32x -> 16x
+
+activation replay remains 4*(I/1024) = 8x
+activation is ~3% of streamed W/S/X bytes on the large boards
+do not spend the remaining register budget on plane pairing first
+```
+
+Raw data:
+
+```text
+ff1_w4a4_swiglu_topk_reduce_n16x2_combined.csv
+ff1_w4a4_swiglu_topk_reduce_n16x2_summary.csv
+ff1_w4a4_swiglu_topk_reduce_combined.csv          serial lineage
+ff1_w4a4_swiglu_topk_reduce_summary.csv           serial lineage
+```
+
+## Global-Partial Checkpoint - Lineage
+
+The section below is the superseded global-partial transport design. Keep it
+for transport lineage; do not use it as the current full-kernel winner.
+
+Corrected CTA1024 schedule:
+
+```text
+kt outer -> i1024 -> n256 -> n8
+4 x m16n8k64 / n8
+BF16 expert partial load + store for kt<last
+last kt -> SwiGLU -> topk_W -> red.global BF16 Y
+W13GSXGSINV = W13GS * XGSINV
+```
+
+Sweep:
+
+```text
+E=384 I=2048 H=7168 TOPK=8
+N={8,256,512} pool={128,384} seeds=3 repeats=20
+72 rows; all PASS; equal checksum / four-mode cell
+```
+
+```text
++-----+------+------------------------------+----------+----------+
+| N   | pool | paired winner                | med ms   | vs TMA0  |
++-----+------+------------------------------+----------+----------+
+|   8 |  128 | no-PF cp.async.ca            |    0.911 |   +4.10% |
+|   8 |  384 | no-PF cp.async.ca            |    0.922 |   +4.30% |
+| 256 |  128 | PF32 cp.async.ca             |   34.638 |   +0.64% |
+| 256 |  384 | PF32 cp.async.ca             |   55.771 |   +0.14% |
+| 512 |  128 | PF32 cp.async.ca             |  141.020 |   +0.33% |
+| 512 |  384 | PF32 cp.async.ca             |  222.017 |   +0.07% |
++-----+------+------------------------------+----------+----------+
+```
+
+Call:
+
+```text
+N=8
+  no-PF cp.async.ca is real: +4.1..4.3% vs TMA0
+
+N>=256
+  no material transport winner
+  every PF/TMA/cp.async result is within 0.7% paired
+  keep TMA0 as standard baseline until partial traffic is removed
+
+why
+  N256 pool384 partial load+store ~= 25.95GB / launch
+  N512 pool384 partial load+store ~= 51.79GB / launch
+  activation X4+SX is only ~= 16MB / 31MB
+  global BF16 partial churn hides the activation transport edge
+```
+
+Runtime SMEM:
+
+```text
+S planes            4 * blockDim.x * 4B
+activation pingpong 2 * min(N,256) * (32B X4 + 4B SX)
+N8                  16960B
+N256/N512           34816B
+```
+
+`ptxas`: 64 registers/thread, one 4B spill slot, 1 CTA/SM. The spill is one
+address value parked across the MMA body; W/B/C payloads are not spilled.
+
+Raw data:
+
+```text
+ff1_w4a4_scattered_combined.csv   72 measured rows
+ff1_w4a4_scattered_summary.csv    paired three-seed summary
+ff1_w4a4_scattered_exp.py         all-in-one source/build/sweep/validation
+```
+
+## Transport-Only Final Call (Lineage)
 
 ```text
 OVERALL BEST         pf32x4_current_tma_smem
