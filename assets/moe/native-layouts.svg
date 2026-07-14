@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080">
+  <defs>
+    <style>
+      .bg{fill:#050505}.grid{stroke:#1c1c1c;stroke-width:1}.box{fill:#090909;stroke:#eee;stroke-width:2}.face{fill:#0d0d0d;stroke:#777;stroke-width:1.3}.hot{fill:#121212;stroke:#fff;stroke-width:3}.cell{fill:#0b0b0b;stroke:#bdbdbd;stroke-width:1.5}.cell2{fill:#151515;stroke:#fff;stroke-width:2}.line{fill:none;stroke:#aaa;stroke-width:2}.flow{fill:none;stroke:#fff;stroke-width:3;marker-end:url(#a)}.dash{fill:none;stroke:#666;stroke-width:1.5;stroke-dasharray:7 7}.h{fill:#fff;font:700 32px 'DejaVu Sans Mono',monospace}.t{fill:#f3f3f3;font:22px 'DejaVu Sans Mono',monospace}.s{fill:#b7b7b7;font:17px 'DejaVu Sans Mono',monospace}.xs{fill:#8d8d8d;font:14px 'DejaVu Sans Mono',monospace}.eq{fill:#d5d5d5;font:16px 'DejaVu Sans Mono',monospace}.glow{filter:url(#g)}
+    </style>
+    <marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6 0 12z" fill="#fff"/></marker>
+    <filter id="g"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="p" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" class="grid" fill="none"/></pattern>
+  </defs>
+  <rect width="1800" height="1080" class="bg"/>
+  <rect x="24" y="24" width="1752" height="1032" fill="url(#p)" opacity=".55"/>
+  <text x="70" y="82" class="h">NATIVE PACKETS: PRODUCER LAYOUT = CONSUMER INSTRUCTION</text>
+  <text x="70" y="116" class="s">the layout is not storage trivia | every 16B row is shaped for the next v4 load</text>
+
+  <!-- X4 / Sx -->
+  <polygon points="70,190 815,190 845,165 100,165" class="face"/>
+  <rect x="70" y="190" width="745" height="330" class="hot glow"/>
+  <polygon points="815,190 845,165 845,495 815,520" class="face"/>
+  <text x="105" y="235" class="t">X4 / Sx  ->  FF1 B FRAGMENTS</text>
+  <text x="105" y="270" class="s">one lane, one 16B v4, adjacent n16 pair</text>
+
+  <text x="110" y="323" class="xs">u32[0]</text><text x="278" y="323" class="xs">u32[1]</text>
+  <text x="446" y="323" class="xs">u32[2]</text><text x="614" y="323" class="xs">u32[3]</text>
+  <rect x="105" y="340" width="150" height="72" class="cell2"/>
+  <rect x="273" y="340" width="150" height="72" class="cell"/>
+  <rect x="441" y="340" width="150" height="72" class="cell2"/>
+  <rect x="609" y="340" width="150" height="72" class="cell"/>
+  <text x="124" y="372" class="s">N8a Klo</text><text x="124" y="397" class="xs">8 weights</text>
+  <text x="292" y="372" class="s">N8a Khi</text><text x="292" y="397" class="xs">8 weights</text>
+  <text x="460" y="372" class="s">N8b Klo</text><text x="460" y="397" class="xs">8 weights</text>
+  <text x="628" y="372" class="s">N8b Khi</text><text x="628" y="397" class="xs">8 weights</text>
+  <text x="105" y="449" class="eq">X4 [e][n16][kt][row8][lp4][n8 x kh]</text>
+  <text x="105" y="479" class="eq">Sx [e][n32][kt][row8][a0 a1 b0 b1]</text>
+
+  <!-- W13 / S13 -->
+  <polygon points="955,190 1700,190 1730,165 985,165" class="face"/>
+  <rect x="955" y="190" width="745" height="330" class="hot glow"/>
+  <polygon points="1700,190 1730,165 1730,495 1700,520" class="face"/>
+  <text x="990" y="235" class="t">W13 / S13  ->  FOUR FF1 MMAs</text>
+  <text x="990" y="270" class="s">one weight packet is reused across both N8 halves</text>
+  <rect x="995" y="325" width="150" height="90" class="cell2"/>
+  <rect x="1165" y="325" width="150" height="90" class="cell"/>
+  <rect x="1335" y="325" width="150" height="90" class="cell2"/>
+  <rect x="1505" y="325" width="150" height="90" class="cell"/>
+  <text x="1034" y="360" class="s">W1 x N8a</text><text x="1034" y="390" class="xs">m16n8k64</text>
+  <text x="1204" y="360" class="s">W1 x N8b</text><text x="1204" y="390" class="xs">m16n8k64</text>
+  <text x="1374" y="360" class="s">W3 x N8a</text><text x="1374" y="390" class="xs">m16n8k64</text>
+  <text x="1544" y="360" class="s">W3 x N8b</text><text x="1544" y="390" class="xs">m16n8k64</text>
+  <text x="990" y="455" class="eq">W13 [e][kt][i1024][plane4][tid][v4]</text>
+  <text x="990" y="485" class="eq">S13 [e][kt][i1024][plane4][half2][q256]</text>
+
+  <path d="M815 355 H955" class="flow"/>
+  <text x="844" y="335" class="xs">native join</text>
+
+  <!-- Y4 / SY -->
+  <polygon points="70,650 815,650 845,625 100,625" class="face"/>
+  <rect x="70" y="650" width="745" height="300" class="box"/>
+  <polygon points="815,650 845,625 845,925 815,950" class="face"/>
+  <text x="105" y="695" class="t">Y4 / SY  ->  FF2 B FRAGMENTS</text>
+  <text x="105" y="730" class="s">FF1 emits the same adjacent-pair packet grammar</text>
+  <rect x="105" y="775" width="150" height="68" class="cell2"/>
+  <rect x="273" y="775" width="150" height="68" class="cell"/>
+  <rect x="441" y="775" width="150" height="68" class="cell2"/>
+  <rect x="609" y="775" width="150" height="68" class="cell"/>
+  <text x="132" y="817" class="s">N8a x2</text><text x="300" y="817" class="s">N8a x2</text>
+  <text x="468" y="817" class="s">N8b x2</text><text x="636" y="817" class="s">N8b x2</text>
+  <text x="105" y="882" class="eq">Y4 [e][n16][I64][row8][lp4][n8 x kh]</text>
+  <text x="105" y="914" class="eq">SY [e][n32][I64][row8][a0 a1 b0 b1]</text>
+
+  <!-- W2 / output -->
+  <polygon points="955,650 1700,650 1730,625 985,625" class="face"/>
+  <rect x="955" y="650" width="745" height="300" class="box"/>
+  <polygon points="1700,650 1730,625 1730,925 1700,950" class="face"/>
+  <text x="990" y="695" class="t">W2 / S2  ->  DIRECT TOKEN REDUCE</text>
+  <text x="990" y="730" class="s">H512 plane / CTA | four N8 results / pair</text>
+  <rect x="995" y="775" width="250" height="68" class="cell2"/>
+  <rect x="1275" y="775" width="170" height="68" class="cell"/>
+  <rect x="1475" y="775" width="180" height="68" class="cell2"/>
+  <text x="1025" y="817" class="s">W2[e][I64][H512]</text>
+  <text x="1305" y="817" class="s">stmatrix</text>
+  <text x="1500" y="807" class="s">cp.reduce</text><text x="1500" y="830" class="xs">16B issuer</text>
+  <text x="990" y="882" class="eq">token = expert_token_idx[e, 1+p]</text>
+  <text x="990" y="914" class="eq">Y[token, h512*512 + warp*16 + g]</text>
+  <path d="M815 805 H955" class="flow"/>
+
+  <line x1="70" y1="1002" x2="1730" y2="1002" class="dash"/>
+  <text x="70" y="1036" class="s">alignment invariant: NP = round_up(N, 32) | X4/Y4 tile n16 | Sx/SY scale quad n32</text>
+</svg>

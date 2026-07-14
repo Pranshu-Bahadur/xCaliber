@@ -1,0 +1,4 @@
+routing,bf16_exact_percent,mean_abs_delta,max_abs_delta,max_rel_delta,baseline_status,direct_status
+uniform,76.454599,0.0130604738,0.5,0.0157480314,PASS,PASS
+zipf,89.879281,0.0074009588,2,0.0141509436,PASS,PASS
+burst,71.721540,0.0168523695,1.5,0.0172413792,PASS,PASS

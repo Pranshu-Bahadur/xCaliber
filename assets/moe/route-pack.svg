@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="920" viewBox="0 0 1700 920">
+  <defs>
+    <style>
+      .bg{fill:#050505}.grid{stroke:#1c1c1c;stroke-width:1}.box{fill:#090909;stroke:#eee;stroke-width:2}.face{fill:#0d0d0d;stroke:#777;stroke-width:1.3}.hot{fill:#121212;stroke:#fff;stroke-width:3}.line{fill:none;stroke:#aaa;stroke-width:2}.flow{fill:none;stroke:#fff;stroke-width:3;marker-end:url(#a)}.dash{fill:none;stroke:#666;stroke-width:1.5;stroke-dasharray:7 7}.h{fill:#fff;font:700 32px 'DejaVu Sans Mono',monospace}.t{fill:#f3f3f3;font:22px 'DejaVu Sans Mono',monospace}.s{fill:#b7b7b7;font:17px 'DejaVu Sans Mono',monospace}.xs{fill:#8d8d8d;font:15px 'DejaVu Sans Mono',monospace}.glow{filter:url(#g)}
+    </style>
+    <marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6 0 12z" fill="#fff"/></marker>
+    <filter id="g"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="p" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" class="grid" fill="none"/></pattern>
+  </defs>
+  <rect width="1700" height="920" class="bg"/>
+  <rect x="24" y="24" width="1652" height="872" fill="url(#p)" opacity=".55"/>
+  <text x="70" y="82" class="h">ROUTING: SCATTERED MEMBERSHIP -> CONTIGUOUS EXPERT ROWS</text>
+  <text x="70" y="116" class="s">forward offset moves the activation  |  inverse token moves the FF2 result home</text>
+
+  <!-- token rows -->
+  <text x="80" y="180" class="t">TOKEN-MAJOR TOPK</text>
+  <text x="80" y="211" class="xs">each row selects 8 experts</text>
+  <g>
+    <rect x="85" y="245" width="235" height="54" class="box"/><text x="105" y="279" class="t">token 000</text>
+    <rect x="85" y="315" width="235" height="54" class="box"/><text x="105" y="349" class="t">token 001</text>
+    <rect x="85" y="385" width="235" height="54" class="box"/><text x="105" y="419" class="t">token 002</text>
+    <rect x="85" y="455" width="235" height="54" class="box"/><text x="105" y="489" class="t">token 003</text>
+    <rect x="85" y="525" width="235" height="54" class="box"/><text x="105" y="559" class="t">token ...</text>
+  </g>
+  <g class="xs">
+    <text x="345" y="279">e7 e2 e9 ...</text>
+    <text x="345" y="349">e2 e4 e1 ...</text>
+    <text x="345" y="419">e9 e7 e3 ...</text>
+    <text x="345" y="489">e2 e6 e4 ...</text>
+  </g>
+
+  <!-- route CTA -->
+  <polygon points="560,250 860,250 905,215 605,215" class="face"/>
+  <polygon points="560,250 860,250 860,600 560,600" class="hot glow"/>
+  <polygon points="860,250 905,215 905,565 860,600" class="face"/>
+  <text x="605" y="301" class="t">ONE CTA / EXPERT</text>
+  <text x="605" y="348" class="s">scan token order</text>
+  <text x="605" y="383" class="s">ballot one 32T word</text>
+  <text x="605" y="418" class="s">CTA prefix -> rank p</text>
+  <line x1="600" y1="450" x2="820" y2="450" class="dash"/>
+  <text x="605" y="493" class="s">no global cursor</text>
+  <text x="605" y="528" class="s">no global atomic</text>
+  <text x="605" y="563" class="s">ascending token order</text>
+  <path d="M450 410 H560" class="flow"/>
+
+  <!-- packed experts -->
+  <text x="1030" y="180" class="t">EXPERT-CONTIGUOUS ROWS</text>
+  <text x="1030" y="211" class="xs">p is local to one expert</text>
+  <g>
+    <polygon points="1035,260 1235,260 1265,235 1065,235" class="face"/>
+    <rect x="1035" y="260" width="200" height="310" class="box"/>
+    <polygon points="1235,260 1265,235 1265,545 1235,570" class="face"/>
+    <text x="1095" y="300" class="t">expert 2</text>
+    <line x1="1055" y1="325" x2="1215" y2="325" class="dash"/>
+    <text x="1062" y="366" class="s">p0 &lt;- t000</text>
+    <text x="1062" y="406" class="s">p1 &lt;- t001</text>
+    <text x="1062" y="446" class="s">p2 &lt;- t003</text>
+    <text x="1062" y="486" class="s">p3 &lt;- ...</text>
+    <text x="1062" y="535" class="xs">count = live rows</text>
+
+    <polygon points="1350,260 1550,260 1580,235 1380,235" class="face"/>
+    <rect x="1350" y="260" width="200" height="310" class="box"/>
+    <polygon points="1550,260 1580,235 1580,545 1550,570" class="face"/>
+    <text x="1410" y="300" class="t">expert 9</text>
+    <line x1="1370" y1="325" x2="1530" y2="325" class="dash"/>
+    <text x="1377" y="366" class="s">p0 &lt;- t000</text>
+    <text x="1377" y="406" class="s">p1 &lt;- t002</text>
+    <text x="1377" y="446" class="s">p2 &lt;- ...</text>
+    <text x="1377" y="535" class="xs">count = live rows</text>
+  </g>
+  <path d="M905 410 H1035" class="flow"/>
+
+  <!-- maps -->
+  <rect x="545" y="690" width="440" height="145" class="box"/>
+  <text x="575" y="730" class="t">FORWARD MAP</text>
+  <text x="575" y="770" class="s">topk_off[token, slot] = p</text>
+  <text x="575" y="803" class="xs">activation scatter destination</text>
+
+  <rect x="1040" y="690" width="520" height="145" class="box"/>
+  <text x="1070" y="730" class="t">INVERSE MAP</text>
+  <text x="1070" y="770" class="s">expert_token_idx[e, 1+p] = token</text>
+  <text x="1070" y="803" class="xs">cp.reduce destination token</text>
+
+  <path d="M740 600 V690" class="flow"/>
+  <path d="M840 600 C920 650 1120 620 1210 690" class="flow"/>
+  <text x="75" y="850" class="s">packed weight sidecar: expert_topk_W[e,p] = topk_W[token,slot]</text>
+  <text x="75" y="880" class="xs">invariant: each token's TOPK expert IDs are unique</text>
+</svg>

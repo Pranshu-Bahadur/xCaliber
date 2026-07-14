@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980">
+  <defs>
+    <style>
+      .bg{fill:#050505}.grid{stroke:#202020;stroke-width:1}.edge{fill:#090909;stroke:#f4f4f4;stroke-width:2}.soft{fill:#0b0b0b;stroke:#7f7f7f;stroke-width:1.4}.hot{fill:#111;stroke:#fff;stroke-width:3}.wire{fill:none;stroke:#d8d8d8;stroke-width:2}.dim{fill:none;stroke:#606060;stroke-width:1.5;stroke-dasharray:8 8}.flow{fill:none;stroke:#fff;stroke-width:3;marker-end:url(#arrow)}.minor{fill:none;stroke:#8b8b8b;stroke-width:2;marker-end:url(#arrow2)}.t{fill:#f5f5f5;font:24px 'DejaVu Sans Mono',monospace}.h{fill:#fff;font:700 34px 'DejaVu Sans Mono',monospace}.s{fill:#bdbdbd;font:19px 'DejaVu Sans Mono',monospace}.xs{fill:#929292;font:16px 'DejaVu Sans Mono',monospace}.tag{fill:#050505;stroke:#fff;stroke-width:1.5}.glow{filter:url(#glow)}
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#fff"/></marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8b8b8b"/></marker>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="microgrid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" class="grid" fill="none"/></pattern>
+  </defs>
+  <rect width="1800" height="980" class="bg"/>
+  <rect x="24" y="24" width="1752" height="932" fill="url(#microgrid)" opacity=".55"/>
+  <text x="80" y="86" class="h">xCALIBER / EXPERT-CONTIGUOUS MoE</text>
+  <text x="80" y="122" class="s">scatter once  |  native tiles thereafter  |  direct hardware reduction</text>
+
+  <!-- input planes -->
+  <polygon points="75,245 355,245 405,205 125,205" class="soft"/>
+  <polygon points="75,245 355,245 355,395 75,395" class="edge"/>
+  <polygon points="355,245 405,205 405,355 355,395" class="soft"/>
+  <text x="112" y="292" class="t">X [N,H] BF16</text>
+  <text x="112" y="330" class="s">token-major</text>
+  <text x="112" y="365" class="xs">read once</text>
+
+  <polygon points="75,535 355,535 405,495 125,495" class="soft"/>
+  <polygon points="75,535 355,535 355,685 75,685" class="edge"/>
+  <polygon points="355,535 405,495 405,645 355,685" class="soft"/>
+  <text x="104" y="580" class="t">topk_idx / W</text>
+  <text x="104" y="619" class="s">[N, TOPK]</text>
+  <text x="104" y="654" class="xs">framework semantics</text>
+
+  <!-- parallel preambles -->
+  <rect x="500" y="180" width="300" height="250" class="hot glow"/>
+  <text x="545" y="232" class="t">ACT PREAMBLE</text>
+  <text x="545" y="278" class="s">global absmax</text>
+  <text x="545" y="313" class="s">XGS / XGSINV</text>
+  <text x="545" y="348" class="s">NVFP4 quantize</text>
+  <rect x="530" y="374" width="240" height="32" class="tag"/>
+  <text x="548" y="397" class="xs">30 regs / 0 spills</text>
+
+  <rect x="500" y="500" width="300" height="250" class="hot glow"/>
+  <text x="535" y="552" class="t">ROUTE PREAMBLE</text>
+  <text x="535" y="598" class="s">one CTA / expert</text>
+  <text x="535" y="633" class="s">deterministic rank p</text>
+  <text x="535" y="668" class="s">no global atomic</text>
+  <rect x="530" y="694" width="240" height="32" class="tag"/>
+  <text x="548" y="717" class="xs">39 regs / 0 spills</text>
+
+  <path d="M405 300 H500" class="flow"/>
+  <path d="M405 610 H500" class="flow"/>
+
+  <!-- join / contiguous store -->
+  <path d="M800 305 H895 V455" class="minor"/>
+  <path d="M800 625 H895 V455" class="minor"/>
+  <circle cx="895" cy="455" r="15" fill="#050505" stroke="#fff" stroke-width="3"/>
+  <text x="838" y="430" class="xs">graph join</text>
+
+  <polygon points="970,205 1215,205 1265,165 1020,165" class="soft"/>
+  <polygon points="970,205 1215,205 1215,415 970,415" class="edge"/>
+  <polygon points="1215,205 1265,165 1265,375 1215,415" class="soft"/>
+  <text x="1005" y="255" class="t">EXPERT PACK</text>
+  <text x="1005" y="298" class="s">X4 / Sx</text>
+  <text x="1005" y="332" class="s">forward: topk_off</text>
+  <text x="1005" y="366" class="s">inverse: token_idx</text>
+  <path d="M895 455 L970 345" class="flow"/>
+
+  <!-- SM/FF stack -->
+  <polygon points="950,545 1245,545 1295,505 1000,505" class="soft"/>
+  <polygon points="950,545 1245,545 1245,795 950,795" class="hot glow"/>
+  <polygon points="1245,545 1295,505 1295,755 1245,795" class="soft"/>
+  <text x="994" y="592" class="t">CTA1024 / EXPERT</text>
+  <line x1="980" y1="620" x2="1215" y2="620" class="dim"/>
+  <text x="1008" y="662" class="t">W4A4 FF1</text>
+  <text x="1008" y="700" class="s">4 N8 MMAs / pair</text>
+  <text x="1008" y="737" class="t">SwiGLU x topk_W</text>
+  <text x="1008" y="770" class="xs">Y4 / SY emitted</text>
+  <path d="M1090 415 V505" class="flow"/>
+
+  <rect x="1380" y="265" width="330" height="240" class="hot glow"/>
+  <text x="1422" y="316" class="t">W4A4 FF2</text>
+  <text x="1422" y="361" class="s">packed Y4 / SY</text>
+  <text x="1422" y="396" class="s">W2 / S2 direct</text>
+  <text x="1422" y="431" class="s">H512 / CTA</text>
+  <rect x="1415" y="451" width="260" height="32" class="tag"/>
+  <text x="1433" y="474" class="xs">64 regs / 0 spills</text>
+  <path d="M1295 675 C1360 675 1345 385 1380 385" class="flow"/>
+
+  <polygon points="1390,650 1650,650 1700,610 1440,610" class="soft"/>
+  <polygon points="1390,650 1650,650 1650,820 1390,820" class="edge"/>
+  <polygon points="1650,650 1700,610 1700,780 1650,820" class="soft"/>
+  <text x="1430" y="702" class="t">Y [N,H] BF16</text>
+  <text x="1430" y="746" class="s">token-major</text>
+  <text x="1430" y="784" class="s">expert sum complete</text>
+  <path d="M1545 505 V610" class="flow"/>
+  <rect x="1400" y="540" width="290" height="38" class="tag glow"/>
+  <text x="1420" y="566" class="s">cp.reduce / 16B issuers</text>
+
+  <text x="80" y="890" class="s">188 SM  |  one resident expert CTA / SM  |  empty expert returns before weight traffic</text>
+  <text x="80" y="925" class="xs">graph: (absmax + route rank) -> expert scatter -> FF1 -> FF2 -> direct token reduction</text>
+</svg>
