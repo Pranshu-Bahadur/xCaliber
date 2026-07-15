@@ -5,17 +5,53 @@ Current operator board for collaborators.
 ```text
 contract       BF16 activations in + 4-bit expert weights
 hot body       native NVFP4 W4A4 FF1 + native NVFP4 W4A4 FF2
-selected path  expert-contiguous compression + direct token reduction
+operator core  expert-contiguous compression + direct token reduction
+speed path     xR58: xCalibrr lane-native checkpoint layouts
+adoption path  xR64: conventional HF / ModelOpt checkpoint layouts
 implementation xFused-NVFP4-Kernels/xMoE/xW4A16
 target         SM120+ / validated on RTX PRO 6000 Blackwell
-status         63 / 63 model-routing cases PASS
+status         xR58: 126 / 126 router-wired cases PASS
 ```
 
 The folder says `xW4A16` because the operator receives BF16 activations.
 Compression is part of the operator. After that preamble, both GEMMs consume
 NVFP4 activations directly.
 
-## Final Call
+## Two Lanes
+
+```text
+xR64 xCalibrr                          xR58 xCalibrr
+conventional checkpoint weights       customized checkpoint weights
+HF / ModelOpt compatible              lane-native W13/S13 + W2/S2
+no xCalibrr weight repack              maximum packet reuse
+runtime fragment assembly             fragments arrive MMA-ready
+adoption path                          performance path
+```
+
+`xR64` is the practical checkpoint-facing variant. It consumes conventional
+HF/ModelOpt NVFP4 weight tensors: packed E2M1 rows, K16 E4M3 scales, and FP32
+global scales. The kernel assembles the PTX MMA fragment in registers and
+applies the FF1 sign transform at runtime. It does not require an xCalibrr
+checkpoint conversion, so existing model weights remain usable.
+
+`xR58` is the full co-design. W13/S13 and W2/S2 are stored in the exact packet
+order consumed by the 1024-thread CTA; FF1 signs are already flipped and the
+global-scale sidecars are compact. That removes checkpoint-layout recovery
+from the hot loop. The kernels are validated; loader/converter and framework
+integration for the custom checkpoint format remain WIP.
+
+Both variants keep the same serious operator core: logits-to-TOPK routing,
+expert-contiguous X4/Sx, native NVFP4 MMA, SwiGLU and TOPK weighting, paired
+Y4/SY, and inverse-map `cp.reduce` into token-major Y. `xR64` is not a toy
+fallback. It is the shortest path from an HF checkpoint to this operator;
+`xR58` is the higher ceiling once the custom layout is integrated.
+
+The measured xR58 headline is `3.449x / 1.528x / 2.145x` faster than the
+earlier W4A4 path on Kimi `uniform / zipf / burst`, with `84.02%` measured
+end-to-end GPU utilization on Kimi N256 uniform. These are not presented as
+an xR58-versus-xR64 comparison; that matched sweep is a separate proof gate.
+
+## xR58 Final Call
 
 ```text
 scatter once -> native tiles thereafter -> reduce straight home
@@ -95,8 +131,9 @@ laid out for full native tiles, so weight panels stop replaying over holes.
 
 ```text
 ACT child graph                       ROUTE child graph
-X -> global absmax                    topk_idx + topk_W
-  -> XGS / XGSINV                       -> packed rank p
+X -> global absmax                    logits -> softmax/sigmoid TOPK
+  -> XGS / XGSINV                       -> topk_idx + topk_W
+                                         -> packed rank p
           |                                      |
           +--------------- join -----------------+
                                   |
@@ -268,7 +305,8 @@ the final token address; it does not mean the hardware reduction disappeared.
 
 ## Why It Won
 
-The fixed-seed Kimi comparison is end to end against the previous W4A4 path:
+The fixed-seed xR58 Kimi comparison is end to end against the previous W4A4
+path:
 
 ```text
 route      direct ms   previous ms   speedup
@@ -276,6 +314,11 @@ uniform      7.0397       24.2777      3.449x
 zipf        17.8848       27.3260      1.528x
 burst        9.8565       21.1412      2.145x
 ```
+
+Nsight Compute measures xR58 at `84.02%` duration-weighted end-to-end GPU
+utilization for Kimi N256 uniform (`83.96%` DRAM throughput, `87.21%` SM
+active). This is a Speed-of-Light utilization metric across the six graph
+compute kernels, not an `nvidia-smi` busy sample.
 
 Uniform improves most because work is spread across expert CTAs and almost
 every packed pair is full. Zipf still has a hot-expert tail: in the N512 Kimi
@@ -288,7 +331,8 @@ Proof board:
 models             7
 N                   8 / 256 / 512
 routing             uniform / zipf / burst
-cases               63 / 63 PASS
+base cases          63 / 63 PASS
+router-wired cases  126 / 126 PASS
 FF1                 56 regs / 0 spills
 FF2                 64 regs / 0 spills
 route mismatches    0
@@ -341,7 +385,10 @@ I, H                 multiples of 64
 route row            unique expert IDs per token
 expert order         ascending original token order
 expert header        expert_token_idx[e,0] = count
-FF1 input            W13 signs already flipped
+FF1 input xR58       W13 signs already flipped
+FF1 input xR64       conventional signs; runtime XOR transform
+weight layout xR58   lane-native xCalibrr packets
+weight layout xR64   conventional HF / ModelOpt NVFP4 rows
 FF2 destination      expert_token_idx[e,1+p]
 Y initialization     zero before FF2 cp.reduce
 hardware             SM120+
@@ -454,7 +501,7 @@ Sx = e * NP * (H >> 6)
 `X4` is naturally n16. `Sx` groups two adjacent n16 rows into one n32 scale
 quad. That is why `NP` must be rounded to 32, even when `N < 32`.
 
-## Appendix E: W13 / S13
+## Appendix E: xR58 W13 / S13
 
 ```text
 W13[e][kt][i1024][plane4][thread1024][v4]
@@ -533,7 +580,7 @@ SY = e * NP * (I >> 6)
 FF1 first tracks BF16 absmax values, reduces one expert-global maximum into
 `YGSINV[e]`, then encodes the final UE4M3 `SY` words.
 
-## Appendix G: W2 / S2
+## Appendix G: xR58 W2 / S2
 
 ```text
 W2[e][ktI][h512][thread1024][v4]
@@ -574,18 +621,39 @@ hbase = h512 * 512 + warp * 16 + (lane & 8)
 issue = Y[token, hbase..hbase+7]    16B
 ```
 
-## Appendix H: Evidence
+## Appendix H: xR64 Conventional Weights
+
+`xR64` changes the persistent weight plane, not the routed activation plane:
+
+```text
+W13     U8   [projection2,E,I,H/2]      two E2M1 values / byte
+S13     E4M3 [projection2,E,I,H/16]     one scale / K16
+W13GS   F32  [projection2,E]
+
+W2      U8   [E,H,I/2]                 two E2M1 values / byte
+S2      E4M3 [E,H,I/16]                one scale / K16
+W2GS    F32  [E]
+```
+
+The loader only stacks experts into these conventional tensors. Scalar `.cs`
+loads materialize each m16n8k64 A fragment in registers; aligned thread groups
+issue the L2 hints. FF1 applies `xor 0x88888888` while the fragment is live.
+X4/Sx and Y4/SY remain xCalibrr-native because they are transient tensors
+created and consumed inside this operator.
+
+## Appendix I: Evidence
 
 ```text
 xFused-NVFP4-Kernels/xMoE/xW4A16/
   preamble.cuh
-  xR57F1_contiguous_graph.cu
-  xR57F2_direct_reduce_graph.cu
-  benchmark.cu
+  xR58FF1FF2/xR58F1.cu
+  xR58FF1FF2/xR58F2.cu
+  xR64FF1FF2/xR64FF1.cu
+  xR64FF1FF2/xR64FF2.cu
+  benchmarks/benchmark.cu
+  benchmarks/results_models.csv
+  benchmarks/results_gpu_util.csv
   README.md
-  results_models.csv
-  results_models_summary.csv
-  results_output_delta_vs_previous_w4a4.csv
 ```
 
 `README.md` is the short result board. This document is the collaborator model.

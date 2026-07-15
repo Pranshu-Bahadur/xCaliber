@@ -1,6 +1,33 @@
-# contiguous direct
+# xCalibrr W4A16 MoE
 
-## final call
+## variants
+
+```text
+variant   checkpoint weight layout                 role
+xR64      conventional HF / ModelOpt NVFP4         adoption path
+xR58      customized xCalibrr MMA-native packets   performance path
+```
+
+`xR64` reads conventional packed E2M1 weights, K16 E4M3 scales, and FP32
+global scales. It keeps existing HF/ModelOpt checkpoint layouts and assembles
+the MMA fragment in registers. No xCalibrr weight repack beyond ordinary
+loader-side expert stacking is required.
+
+`xR58` stores W13/S13 and W2/S2 in the exact packets consumed by the CTA.
+That is the measured winner: up to `3.449x` faster than the earlier W4A4 path
+and `84.02%` measured end-to-end GPU utilization on Kimi N256 uniform.
+The custom checkpoint loader/converter and framework integration remain WIP.
+
+Both are real xCalibrr kernels. They share TOPK routing, expert-contiguous
+activation compression, native NVFP4 FF1/FF2, and direct token reduction.
+`xR64` is the compatibility lane; `xR58` is the full co-designed speed lane.
+"Conventional" refers to the persistent checkpoint weights; transient X4/Sx
+and Y4/SY stay operator-native in both variants because xCalibrr produces and
+consumes them internally.
+The published speedup is xR58 versus the earlier W4A4 path, not xR58 versus
+xR64. A matched xR64/xR58 sweep is still required for that claim.
+
+## xR58 final call
 
 Expert-contiguous activation compression + contiguous FF1 + direct FF2
 `cp.reduce` is the current winner.
@@ -11,6 +38,7 @@ Expert-contiguous activation compression + contiguous FF1 + direct FF2
   `+1.27% sigmoid` geometric mean
 - Kimi fixed-seed vs previous W4A4 path: `3.449x / 1.528x / 2.145x`
   for `uniform / zipf / burst`
+- Kimi N256 uniform: `84.02%` measured end-to-end GPU utilization
 - FF1: `56 regs`, `0 spills`
 - FF2: `64 regs`, `0 spills`
 - FF2 still reduces straight into token-major `Y` with
@@ -120,7 +148,7 @@ The delta is in the same range as the earlier async BF16 reduction variants.
 Route/offset mismatches, nonfinite outputs, and padded-token writes are all
 zero across the full sweep.
 
-## GPU utilization
+## xR58 GPU utilization
 
 `overall_gpu_util_pct` is the kernel-duration-weighted Nsight Compute
 `gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed` value across
@@ -129,10 +157,11 @@ throughput metric, not an `nvidia-smi` busy sample. The async `Y` memset is not
 an NCU kernel and is excluded from the weighting.
 
 ```text
-Kimi N512   overall GPU   DRAM      SM active   tensor pipe
-uniform       82.57%      82.45%      85.72%       7.19%
-zipf          29.23%      29.16%      29.48%       2.99%
-burst         46.41%      46.31%      48.46%       4.70%
+Kimi          N      route     overall GPU   DRAM      SM active   tensor pipe
+headline     256     uniform      84.02%      83.96%      87.21%       7.15%
+scale        512     uniform      82.57%      82.45%      85.72%       7.19%
+skew         512     zipf         29.23%      29.16%      29.48%       2.99%
+skew         512     burst        46.41%      46.31%      48.46%       4.70%
 ```
 
 All 63 cases are DRAM-bound by the measured SoL counters. Across the full
@@ -144,21 +173,13 @@ hot-expert tail, while low-expert-count shapes cannot occupy all 188 SMs.
 
 - `topk.cuh`: warp-local BF16 softmax / sigmoid top-k
 - `preamble.cuh`: deterministic packing + expert-contiguous NVFP4 scatter
-- `xR57F1_contiguous_graph.cu`: contiguous FF1, no activation prefetch
-- `xR57F2_direct_reduce_graph.cu`: direct inverse-map `cp.reduce` FF2
-- `benchmark.cu`: one-graph logits -> top-k -> MoE harness
-- `results_topk_full.csv`: all 126 router-wired rows
-- `results_topk_full_summary.csv`: 42 router/model/token summaries
-- `ptxas_topk_full.log`: top-k + operator resource report
-- `colab_sweep_topk.py`: full softmax / sigmoid sweep
-- `colab_topk_memcheck.py`: both modes under Compute Sanitizer
-- `results_models.csv`: historical 63-row precomputed-top-k baseline
-- `results_models_summary.csv`: 21 model/token summaries
-- `results_output_delta_vs_previous_w4a4.csv`: BF16 output deltas
-- `colab_profile_gpu_util.py`: one-graph Nsight Compute sweep
-- `results_gpu_util.csv`: 63 aggregate utilization rows
-- `results_gpu_util_kernels.csv`: 378 raw per-kernel rows
-- `results_gpu_util_summary.csv`: 21 collaborator-facing summaries
+- `xR58FF1FF2/`: customized-layout FF1 + FF2 speed path
+- `xR64FF1FF2/`: conventional-layout HF/ModelOpt-compatible FF1 + FF2
+- `benchmarks/benchmark.cu`: one-graph logits -> top-k -> MoE harness
+- `benchmarks/results_topk_full.csv`: all 126 router-wired xR58 rows
+- `benchmarks/results_gpu_util.csv`: 63 xR58 utilization rows
+- `benchmarks/results_gpu_util_kernels.csv`: 378 raw per-kernel rows
+- `benchmarks/results_models.csv`: historical 63-row precomputed-top-k baseline
 
 ```bash
 ./benchmark E N I H TOPK {uniform|zipf|burst} seed iters output.csv \
