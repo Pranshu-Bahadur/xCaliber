@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+#include "topk.cuh"
+
 #define MOE_PREAMBLE_CTA 256
 
 struct alignas(8) MoeActScale {

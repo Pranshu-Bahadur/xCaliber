@@ -5,7 +5,10 @@
 Expert-contiguous activation compression + contiguous FF1 + direct FF2
 `cp.reduce` is the current winner.
 
-- full board: `63 / 63 PASS`
+- router-wired board: `126 / 126 PASS` (`63 softmax + 63 sigmoid`)
+- top-k: `29 regs`, `0 spills`; swept indices and BF16 weights are exact
+- router tax vs stored precomputed-top-k sweep: `+1.07% softmax`,
+  `+1.27% sigmoid` geometric mean
 - Kimi fixed-seed vs previous W4A4 path: `3.449x / 1.528x / 2.145x`
   for `uniform / zipf / burst`
 - FF1: `56 regs`, `0 spills`
@@ -16,7 +19,11 @@ Expert-contiguous activation compression + contiguous FF1 + direct FF2
 ## board
 
 ```text
-topk_idx[N,TOPK] + topk_W[N,TOPK]
+finite BF16 logits[N,E]
+                 |
+                 v
+moe_topk_bf16<softmax | sigmoid>
+  -> topk_idx i32[N,TOPK] + topk_W BF16[N,TOPK]
                  |
                  v
 one CTA / expert: deterministic rank p, no global atomic
@@ -37,11 +44,40 @@ FF1: adjacent packed n16 pairs, no activation PF
 Y4/SY -> FF2 -> shared issue tiles
                  |
                  v
-expert_token_idx[e,p] -> token -> cp.reduce -> Y[token,H]
+expert_token_idx[e,1+p] -> token -> cp.reduce -> Y[token,H]
 ```
 
 `NP = round_up(N, 32)`. X4 is n16-packed, but Sx/SY are n32 scale-quad
 layouts; NP16 corrupts the expert stride when `N < 32`.
+
+## router
+
+```text
+CTA256 = 8 tokens                  warp w = token 8*block + w
+lane l = {2l, 2l+1} + 64j         one u32 dead mask / lane
+
+BF16 raw -> ordered bits -> {ordered, 0xffff-expert}
+                                |
+                                v
+                       redux.sync.max.u32
+                                |
+                select rank -> set dead bit -> next rank
+```
+
+Softmax and sigmoid preserve logit order, so the rank path stays integer.
+Only the selected `TOPK` logits enter `ex2.approx` / `rcp.approx`; selected
+weights are normalized to sum to `routed_scale`. Lower expert wins equal-logit
+ties. Current contract is even `E <= 1024`, `TOPK <= min(E,8)`.
+
+```text
+gate       cases    topk errors   max BF16 |dw|   e2e tax vs precomputed
+softmax    63/63         0           0.0                +1.07%
+sigmoid    63/63         0           0.0                +1.27%
+```
+
+This tax is the geometric mean of matched model / N / routing / seed rows. It
+is an end-to-end comparison against the stored sweep, not isolated top-k
+latency. Sigmoid is `0.20%` slower than softmax geometrically.
 
 ## kimi fixed seed
 
@@ -52,8 +88,9 @@ zipf      17.884800     27.326048     1.528x
 burst      9.856512     21.141216     2.145x
 ```
 
-## full sweep
+## precomputed top-k baseline
 
+This historical 63-case table predates the integrated logits -> top-k node.
 Each cell is `uniform / zipf / burst` end-to-end milliseconds, 20 iterations.
 
 ```text
@@ -83,12 +120,47 @@ The delta is in the same range as the earlier async BF16 reduction variants.
 Route/offset mismatches, nonfinite outputs, and padded-token writes are all
 zero across the full sweep.
 
+## GPU utilization
+
+`overall_gpu_util_pct` is the kernel-duration-weighted Nsight Compute
+`gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed` value across
+the six compute kernels in one captured graph launch. It is a Speed-of-Light
+throughput metric, not an `nvidia-smi` busy sample. The async `Y` memset is not
+an NCU kernel and is excluded from the weighting.
+
+```text
+Kimi N512   overall GPU   DRAM      SM active   tensor pipe
+uniform       82.57%      82.45%      85.72%       7.19%
+zipf          29.23%      29.16%      29.48%       2.99%
+burst         46.41%      46.31%      48.46%       4.70%
+```
+
+All 63 cases are DRAM-bound by the measured SoL counters. Across the full
+model mix, mean overall utilization is `64.12% / 24.91% / 31.66%` for
+`uniform / zipf / burst`. Balanced large shapes reach the 80s; skew leaves a
+hot-expert tail, while low-expert-count shapes cannot occupy all 188 SMs.
+
 ## files
 
+- `topk.cuh`: warp-local BF16 softmax / sigmoid top-k
 - `preamble.cuh`: deterministic packing + expert-contiguous NVFP4 scatter
 - `xR57F1_contiguous_graph.cu`: contiguous FF1, no activation prefetch
 - `xR57F2_direct_reduce_graph.cu`: direct inverse-map `cp.reduce` FF2
-- `benchmark.cu`: one-graph end-to-end harness
-- `results_models.csv`: all 63 rows
+- `benchmark.cu`: one-graph logits -> top-k -> MoE harness
+- `results_topk_full.csv`: all 126 router-wired rows
+- `results_topk_full_summary.csv`: 42 router/model/token summaries
+- `ptxas_topk_full.log`: top-k + operator resource report
+- `colab_sweep_topk.py`: full softmax / sigmoid sweep
+- `colab_topk_memcheck.py`: both modes under Compute Sanitizer
+- `results_models.csv`: historical 63-row precomputed-top-k baseline
 - `results_models_summary.csv`: 21 model/token summaries
 - `results_output_delta_vs_previous_w4a4.csv`: BF16 output deltas
+- `colab_profile_gpu_util.py`: one-graph Nsight Compute sweep
+- `results_gpu_util.csv`: 63 aggregate utilization rows
+- `results_gpu_util_kernels.csv`: 378 raw per-kernel rows
+- `results_gpu_util_summary.csv`: 21 collaborator-facing summaries
+
+```bash
+./benchmark E N I H TOPK {uniform|zipf|burst} seed iters output.csv \
+  [softmax|sigmoid]
+```

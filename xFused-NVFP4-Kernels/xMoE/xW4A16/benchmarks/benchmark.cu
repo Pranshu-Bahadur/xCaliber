@@ -1,6 +1,8 @@
 #include "xR57F1_contiguous_graph.cu"
 #include "xR57F2_direct_reduce_graph.cu"
 
+#include <cuda_profiler_api.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -45,6 +47,7 @@ struct Buffers {
     uint32_t *W2 = nullptr, *S2 = nullptr;
     uint16_t* W2GS = nullptr;
     uint16_t* X = nullptr;
+    uint16_t* logits = nullptr;
     int32_t* topk_idx = nullptr;
     uint16_t* topk_W = nullptr;
     uint32_t *X4 = nullptr, *Sx = nullptr;
@@ -76,6 +79,12 @@ static uint16_t bf16_raw(float x) {
     uint16_t raw;
     std::memcpy(&raw, &b, sizeof(raw));
     return raw;
+}
+
+static float bf16_f32(uint16_t raw) {
+    __nv_bfloat16 b;
+    std::memcpy(&b, &raw, sizeof(raw));
+    return __bfloat162float(b);
 }
 
 static void add_unique(std::vector<int>& row, int e) {
@@ -126,28 +135,48 @@ static std::vector<std::vector<int>> make_routes(
 static RouteStats encode_topk_inputs(
     const std::vector<std::vector<int>>& routes,
     const Shape& s,
+    const std::string& gate,
+    uint32_t seed,
+    std::vector<uint16_t>& logits,
     std::vector<int32_t>& topk_idx,
     std::vector<uint16_t>& topk_W,
     std::vector<uint16_t>& topk_off,
     std::vector<uint16_t>& expert_topk_W,
     std::vector<uint16_t>& expert_token_idx
 ) {
+    logits.resize((uint64_t)s.N * s.E);
     topk_idx.resize((uint64_t)s.N * s.TOPK);
     topk_W.resize((uint64_t)s.N * s.TOPK);
     topk_off.resize((uint64_t)s.N * s.TOPK);
     expert_topk_W.assign((uint64_t)s.E * s.NP, 0u);
     expert_token_idx.assign((uint64_t)s.E * (s.NP + 1u), 0u);
     std::vector<uint32_t> counts(s.E, 0u);
-    uint16_t weight = bf16_raw(1.0f / float(s.TOPK));
 
     for (int n = 0; n < s.N; n++) {
+        for (int e = 0; e < s.E; e++) {
+            uint32_t r = mix32((uint32_t)(n * s.E + e) ^ seed);
+            logits[(uint64_t)n * s.E + e]
+                = bf16_raw(-4.0f + float(r & 1023u) * (1.0f / 4096.0f));
+        }
+        float weight[8];
+        float sum = 0.0f;
+        for (int k = 0; k < s.TOPK; k++) {
+            int e = routes[n][k];
+            float x = 4.0f - 0.5f * float(k);
+            logits[(uint64_t)n * s.E + e] = bf16_raw(x);
+            weight[k] = gate == "sigmoid"
+                ? 1.0f / (1.0f + std::exp(-x))
+                : std::exp(x - 4.0f);
+            sum += weight[k];
+        }
         for (int k = 0; k < s.TOPK; k++) {
             int e = routes[n][k];
             uint32_t p = counts[e]++;
+            uint16_t w = bf16_raw(weight[k] / sum);
             topk_idx[(uint64_t)n * s.TOPK + k] = e;
-            topk_W[(uint64_t)n * s.TOPK + k] = weight;
+            topk_W[(uint64_t)n * s.TOPK + k] = w;
             topk_off[(uint64_t)n * s.TOPK + k] = (uint16_t)p;
-            expert_topk_W[(uint64_t)e * s.NP + p] = weight;
+            expert_topk_W[(uint64_t)e * s.NP + p] = w;
             expert_token_idx[(uint64_t)e * (s.NP + 1u) + 1u + p]
                 = (uint16_t)n;
         }
@@ -244,18 +273,32 @@ static GraphExec build_act_graph(const Shape& s, const Buffers& b) {
     return out;
 }
 
-static GraphExec build_route_graph(const Shape& s, const Buffers& b) {
+static GraphExec build_route_graph(
+    const Shape& s,
+    const Buffers& b,
+    bool sigmoid
+) {
     GraphExec out;
     CUDA_CHECK(cudaGraphCreate(&out.graph, 0));
+    const uint16_t* logits = b.logits;
     const int32_t* topk_idx = b.topk_idx;
     const uint16_t* topk_W = b.topk_W;
     uint16_t* topk_off = b.topk_off;
     uint16_t* expert_topk_W = b.expert_topk_W;
     uint16_t* expert_token_idx = b.expert_token_idx;
-    int N = s.N, NP = s.NP, TOPK = s.TOPK;
+    int N = s.N, E = s.E, NP = s.NP, TOPK = s.TOPK;
+    float routed_scale = 1.0f;
+    void* tk[] = {&logits, &topk_idx, &topk_W,
+                  &N, &E, &TOPK, &routed_scale};
+    void* topk_fn = sigmoid
+        ? (void*)moe_topk_bf16<true>
+        : (void*)moe_topk_bf16<false>;
+    cudaGraphNode_t topk = add_kernel(
+        out.graph, {}, topk_fn,
+        ((uint32_t)s.N + 7u) >> 3, MOE_TOPK_CTA, 0, tk);
     void* r0[] = {&topk_idx, &topk_W, &topk_off, &expert_topk_W,
                   &expert_token_idx, &N, &NP, &TOPK};
-    add_kernel(out.graph, {}, (void*)moe_route_pack_contiguous,
+    add_kernel(out.graph, {topk}, (void*)moe_route_pack_contiguous,
                s.E, MOE_PREAMBLE_CTA, 0, r0);
     return out;
 }
@@ -360,9 +403,10 @@ static void destroy_graph(GraphExec& graph) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 10) {
+    if (argc != 10 && argc != 11) {
         std::fprintf(stderr,
-            "usage: %s E N I H TOPK {uniform|zipf|burst} seed iters output.csv\n",
+            "usage: %s E N I H TOPK {uniform|zipf|burst} seed iters "
+            "output.csv [softmax|sigmoid]\n",
             argv[0]);
         return 2;
     }
@@ -377,6 +421,7 @@ int main(int argc, char** argv) {
     uint32_t seed = (uint32_t)std::strtoul(argv[7], nullptr, 0);
     int iters = std::atoi(argv[8]);
     const char* csv_path = argv[9];
+    std::string gate = argc == 11 ? argv[10] : "softmax";
     // X4 is n16-packed, but Sx/SY are scale-quad n32 layouts.
     s.NP = (s.N + 31) & ~31;
     uint64_t pairs = (uint64_t)s.N * s.H / 2u;
@@ -385,13 +430,15 @@ int main(int argc, char** argv) {
             (pairs + MOE_PREAMBLE_CTA * 8u - 1u)
             / (MOE_PREAMBLE_CTA * 8u)));
 
-    if (s.E < s.TOPK || s.N <= 0 || s.N > 65535
+    if (s.E < s.TOPK || s.E > 1024 || (s.E & 1)
+        || s.N <= 0 || s.N > 65535
         || s.I <= 0 || s.H <= 0
         || (s.I & 63) || (s.H & 63) || s.TOPK <= 0 || s.TOPK > 8
-        || iters <= 0) {
+        || (gate != "softmax" && gate != "sigmoid") || iters <= 0) {
         std::fprintf(stderr,
-            "requires E>=TOPK, 0<N<=65535, I%%64=H%%64=0, "
-            "1<=TOPK<=8, iters>0\n");
+            "requires even TOPK<=E<=1024, 0<N<=65535, "
+            "I%%64=H%%64=0, 1<=TOPK<=8, "
+            "gate={softmax|sigmoid}, iters>0\n");
         return 2;
     }
 
@@ -404,14 +451,15 @@ int main(int argc, char** argv) {
     }
 
     auto routes = make_routes(s.E, s.N, s.TOPK, routing, seed);
+    std::vector<uint16_t> hLogits;
     std::vector<int32_t> hTopkIdx;
     std::vector<uint16_t> hTopkW;
     std::vector<uint16_t> hTopkOffRef;
     std::vector<uint16_t> hExpertTopkRef;
     std::vector<uint16_t> hExpertTokenRef;
     RouteStats rs = encode_topk_inputs(
-        routes, s, hTopkIdx, hTopkW, hTopkOffRef, hExpertTopkRef,
-        hExpertTokenRef);
+        routes, s, gate, seed, hLogits, hTopkIdx, hTopkW,
+        hTopkOffRef, hExpertTopkRef, hExpertTokenRef);
     std::string route_path = std::string(csv_path) + ".routes.i32";
     FILE* route_file = std::fopen(route_path.c_str(), "wb");
     if (!route_file
@@ -443,6 +491,7 @@ int main(int argc, char** argv) {
     uint64_t requested = (W13_u32 + S13_u32 + W2_u32 + S2_u32
                          + X4_u32 + Sx_u32 + Y4_u32 + SY_alloc_u32) * 4u
                        + ((uint64_t)s.N * s.H + (uint64_t)s.H * s.NP) * 2u
+                       + (uint64_t)s.N * s.E * sizeof(uint16_t)
                        + (uint64_t)s.E * (3u * sizeof(uint32_t)
                            + 3u * sizeof(uint16_t))
                        + (uint64_t)s.E * (s.NP + 1u) * sizeof(uint16_t)
@@ -467,6 +516,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMalloc(&b.S2, S2_u32 * sizeof(uint32_t)));
     CUDA_CHECK(cudaMalloc(&b.W2GS, (uint64_t)s.E * sizeof(uint16_t)));
     CUDA_CHECK(cudaMalloc(&b.X, hX.size() * sizeof(uint16_t)));
+    CUDA_CHECK(cudaMalloc(&b.logits, hLogits.size() * sizeof(uint16_t)));
     CUDA_CHECK(cudaMalloc(&b.topk_idx, hTopkIdx.size() * sizeof(int32_t)));
     CUDA_CHECK(cudaMalloc(&b.topk_W, hTopkW.size() * sizeof(uint16_t)));
     CUDA_CHECK(cudaMalloc(&b.X4, X4_u32 * sizeof(uint32_t)));
@@ -486,11 +536,8 @@ int main(int argc, char** argv) {
 
     CUDA_CHECK(cudaMemcpy(b.X, hX.data(), hX.size() * sizeof(uint16_t),
                           cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(b.topk_idx, hTopkIdx.data(),
-                          hTopkIdx.size() * sizeof(int32_t),
-                          cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(b.topk_W, hTopkW.data(),
-                          hTopkW.size() * sizeof(uint16_t),
+    CUDA_CHECK(cudaMemcpy(b.logits, hLogits.data(),
+                          hLogits.size() * sizeof(uint16_t),
                           cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemset(b.Y4, 0, Y4_u32 * sizeof(uint32_t)));
     CUDA_CHECK(cudaMemset(b.SY, 0, SY_alloc_u32 * sizeof(uint32_t)));
@@ -512,7 +559,7 @@ int main(int argc, char** argv) {
         F2_CTA * 8u * sizeof(uint32_t)));
 
     GraphExec act = build_act_graph(s, b);
-    GraphExec route = build_route_graph(s, b);
+    GraphExec route = build_route_graph(s, b, gate == "sigmoid");
     GraphExec expert = build_expert_graph(s, b);
     GraphExec e2e = build_e2e_graph(act, route, expert);
     cudaStream_t join_stream;
@@ -520,14 +567,26 @@ int main(int argc, char** argv) {
 
     double e2e_ms = time_graph(e2e, join_stream, iters);
 
+    if (std::getenv("XCALIBER_PROFILE_ONCE"))
+        CUDA_CHECK(cudaProfilerStart());
     CUDA_CHECK(cudaGraphLaunch(e2e.exec, join_stream));
     CUDA_CHECK(cudaStreamSynchronize(join_stream));
+    if (std::getenv("XCALIBER_PROFILE_ONCE"))
+        CUDA_CHECK(cudaProfilerStop());
 
+    std::vector<int32_t> hTopkIdxOut(hTopkIdx.size());
+    std::vector<uint16_t> hTopkWOut(hTopkW.size());
     std::vector<uint16_t> hTopkOff(hTopkOffRef.size());
     std::vector<uint16_t> hExpertTopk(hExpertTopkRef.size());
     std::vector<uint16_t> hExpertToken(hExpertTokenRef.size());
     std::vector<uint32_t> hYGSINV(s.E);
     std::vector<uint16_t> hO((uint64_t)s.H * s.NP);
+    CUDA_CHECK(cudaMemcpy(hTopkIdxOut.data(), b.topk_idx,
+                          hTopkIdxOut.size() * sizeof(int32_t),
+                          cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(hTopkWOut.data(), b.topk_W,
+                          hTopkWOut.size() * sizeof(uint16_t),
+                          cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(hTopkOff.data(), b.topk_off,
                           hTopkOff.size() * sizeof(uint16_t),
                           cudaMemcpyDeviceToHost));
@@ -553,6 +612,24 @@ int main(int argc, char** argv) {
             return 2;
         }
         std::fclose(output_file);
+    }
+
+    uint64_t topk_errors = 0;
+    float topk_weight_max_abs = 0.0f;
+    for (uint64_t x = 0; x < hTopkIdx.size(); x++) {
+        topk_errors += hTopkIdxOut[x] != hTopkIdx[x];
+        float diff = std::abs(bf16_f32(hTopkWOut[x]) - bf16_f32(hTopkW[x]));
+        topk_weight_max_abs = std::max(topk_weight_max_abs, diff);
+        topk_errors += diff > (1.0f / 256.0f);
+    }
+    std::fill(hExpertTopkRef.begin(), hExpertTopkRef.end(), 0u);
+    for (int n = 0; n < s.N; n++) {
+        for (int k = 0; k < s.TOPK; k++) {
+            uint64_t x = (uint64_t)n * s.TOPK + k;
+            uint32_t e = (uint32_t)hTopkIdx[x];
+            uint32_t p = hTopkOffRef[x];
+            hExpertTopkRef[(uint64_t)e * s.NP + p] = hTopkWOut[x];
+        }
     }
 
     uint64_t route_errors = 0;
@@ -588,7 +665,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         &f2_blocks, xR57F2_direct_reduce_graph, F2_CTA,
         F2_CTA * 8u * sizeof(uint32_t)));
-    bool pass = !route_errors && !scale_errors && !nonfinite
+    bool pass = !topk_errors && !route_errors && !scale_errors && !nonfinite
              && !padded_nonzero && useful_nonzero && f1_blocks == 1
              && f2_blocks >= 1;
     double useful_tflops = 6.0 * double(rs.assignments) * s.I * s.H
@@ -600,18 +677,20 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::fprintf(csv,
-        "gpu,sms,mode,routing,seed,iters,E,N,NP,I,H,TOPK,live_experts,"
+        "gpu,sms,mode,topk_mode,routing,seed,iters,E,N,NP,I,H,TOPK,live_experts,"
         "assignments,active_n8,active_n16,paired_n16,max_tokens_per_expert,"
         "max_active_n8_per_expert,max_active_n16_per_expert,"
         "max_paired_n16_per_expert,end_to_end_ms,useful_tflops,"
-        "route_errors,scale_errors,"
+        "topk_errors,topk_weight_max_abs,route_errors,scale_errors,"
         "nonfinite,padded_nonzero,useful_nonzero,f1_blocks_per_sm,"
         "f2_blocks_per_sm,checksum,validation_scope,status\n");
     std::fprintf(csv,
-        "%s,%d,contiguous_direct_ff1_ff2_cp_reduce_w4a4,%s,0x%08x,%d,%d,%d,%d,%d,%d,%d,%d,"
+        "%s,%d,contiguous_direct_ff1_ff2_cp_reduce_w4a4,%s,%s,0x%08x,%d,%d,%d,%d,%d,%d,%d,%d,"
         "%llu,%llu,%llu,%llu,%u,%u,%u,%u,%.6f,%.6f,"
-        "%llu,%llu,%llu,%llu,%llu,%d,%d,0x%016llx,route_scale_finite,%s\n",
-        prop.name, prop.multiProcessorCount, routing.c_str(), seed, iters,
+        "%llu,%.8f,%llu,%llu,%llu,%llu,%llu,%d,%d,0x%016llx,"
+        "topk_route_scale_finite,%s\n",
+        prop.name, prop.multiProcessorCount, gate.c_str(), routing.c_str(),
+        seed, iters,
         s.E, s.N, s.NP, s.I, s.H, s.TOPK, rs.live_experts,
         (unsigned long long)rs.assignments,
         (unsigned long long)rs.active_n8,
@@ -622,6 +701,8 @@ int main(int argc, char** argv) {
         rs.max_active_n16_per_expert,
         rs.max_paired_n16_per_expert,
         e2e_ms, useful_tflops,
+        (unsigned long long)topk_errors,
+        topk_weight_max_abs,
         (unsigned long long)route_errors,
         (unsigned long long)scale_errors,
         (unsigned long long)nonfinite,
@@ -636,9 +717,12 @@ int main(int argc, char** argv) {
     std::printf("+----------------------+------------+\n");
     std::printf("| END TO END ONLY     | %10.6f |\n", e2e_ms);
     std::printf("+----------------------+------------+\n");
-    std::printf("status=%s useful_tflops=%.3f route_errors=%llu "
+    std::printf("status=%s useful_tflops=%.3f topk_errors=%llu "
+                "topk_weight_max_abs=%.8f route_errors=%llu "
                 "scale_errors=%llu nonfinite=%llu csv=%s\n",
                 pass ? "PASS" : "FAIL", useful_tflops,
+                (unsigned long long)topk_errors,
+                topk_weight_max_abs,
                 (unsigned long long)route_errors,
                 (unsigned long long)scale_errors,
                 (unsigned long long)nonfinite, csv_path);
@@ -650,7 +734,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaStreamDestroy(join_stream));
     cudaFree(b.W13); cudaFree(b.S13); cudaFree(b.W13GS);
     cudaFree(b.W2); cudaFree(b.S2); cudaFree(b.W2GS);
-    cudaFree(b.X); cudaFree(b.topk_idx); cudaFree(b.topk_W);
+    cudaFree(b.X); cudaFree(b.logits);
+    cudaFree(b.topk_idx); cudaFree(b.topk_W);
     cudaFree(b.X4); cudaFree(b.Sx); cudaFree(b.topk_off);
     cudaFree(b.expert_topk_W); cudaFree(b.expert_token_idx);
     cudaFree(b.Y4); cudaFree(b.SY);
