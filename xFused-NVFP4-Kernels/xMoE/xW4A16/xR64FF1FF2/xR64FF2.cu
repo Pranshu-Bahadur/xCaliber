@@ -30,15 +30,15 @@
     S2 row-major K16 scales:
       lp0 supplies row g, lp1 supplies row g+8
 
-    Y4[e,n16,kt,q8,lp4,{n8_0x2,n8_1x2}]
-      one lane-native v4 materializes both N8 B fragments
+    Y4 u32[e,N,I/8] = [e,N,I/64,8]
+      one v2 per live N8 row materializes its B fragment
 
     expert_token_idx[e,0]        = live count
     expert_token_idx[e,1+packed] = original token
       reduction tail maps packed rows directly to Y[token,H]
 
-    SY[e,n32,kt,q8,{n16a_0,n16a_1,n16b_0,n16b_1}]
-      one lane-native v4 materializes all four MMA scale fragments
+    SY u32[e,N,I/64]
+      one u32 per live token/K64 holds four K16 scales
 
     routed N16 pairing
       header count -> adjacent packed N16 pairs, no sparse Xb scan
@@ -52,20 +52,20 @@
     YGSINV[e] = BF16x2({YGSINV,YGSINV}) produced by FF1
     post2      = F32(W2GS[e]) * BF16(YGSINV[e].lo)
 
-    Y[NP,H] BF16
+    Y[N,H] BF16
       zero before launch; global Y is the linear FF2 K accumulator
 */
 __global__ __launch_bounds__(F2_CTA, 1)
 void xR57F2_modelopt_direct_reduce_graph(
-    const uint32_t* __restrict__ W2,
-    const uint32_t* __restrict__ S2,
+    const uint8_t* __restrict__ W2,
+    const uint8_t* __restrict__ S2,
     const float* __restrict__ W2GS,
     const uint32_t* __restrict__ Y4,
     const uint32_t* __restrict__ SY,
     const uint32_t* __restrict__ YGSINV,
     const uint16_t* __restrict__ expert_token_idx,
     __nv_bfloat16* __restrict__ Y,
-    int NP,
+    int N,
     int I,
     int H
 ) {
@@ -88,7 +88,7 @@ void xR57F2_modelopt_direct_reduce_graph(
                  : "=h"(selector0)
                  : "l"((uint64_t)__cvta_generic_to_global(
                        expert_token_idx
-                       + (uint64_t)blockIdx.x * ((uint32_t)NP + 1u)))
+                       + (uint64_t)blockIdx.x * ((uint32_t)N + 1u)))
                  : "memory");
     count = selector0;
     if (!count) return;
@@ -134,37 +134,21 @@ void xR57F2_modelopt_direct_reduce_graph(
                             + (((uint32_t)threadIdx.x & 31u) >> 2)
                             < (uint32_t)H) {
                             asm volatile(
-                                "{\n\t"
-                                ".reg .pred p;\n\t"
-                                ".reg .b32 q;\n\t"
-                                "mov.u32 q, %%laneid;\n\t"
-                                "and.b32 q, q, 3;\n\t"
-                                "setp.eq.u32 p, q, 0;\n\t"
-                                "@p cp.async.bulk.prefetch.L2.global [%2], 32;\n\t"
                                 "ld.global.cs.u32 %0, [%2];\n\t"
                                 "ld.global.cs.u32 %1, [%2 + 16];\n\t"
-                                "}"
                                 : "=r"(a0), "=r"(a2)
                                 : "l"(W2
                                     + ((uint64_t)blockIdx.x * (uint32_t)H
                                         + (uint32_t)(h512 << 9)
                                         + (((uint32_t)threadIdx.x >> 5) << 4)
                                         + (((uint32_t)threadIdx.x & 31u) >> 2))
-                                        * ((uint32_t)I >> 3)
-                                    + (uint32_t)((ip << 5) + k) * 8u
-                                    + ((uint32_t)threadIdx.x & 3u))
+                                        * ((uint32_t)I >> 1)
+                                    + (uint32_t)((ip << 5) + k) * 32u
+                                    + ((uint32_t)threadIdx.x & 3u) * 4u)
                                 : "memory");
                             asm volatile(
-                                "{\n\t"
-                                ".reg .pred p;\n\t"
-                                ".reg .b32 q;\n\t"
-                                "mov.u32 q, %%laneid;\n\t"
-                                "and.b32 q, q, 3;\n\t"
-                                "setp.eq.u32 p, q, 0;\n\t"
-                                "@p cp.async.bulk.prefetch.L2.global [%2], 32;\n\t"
                                 "ld.global.cs.u32 %0, [%2];\n\t"
                                 "ld.global.cs.u32 %1, [%2 + 16];\n\t"
-                                "}"
                                 : "=r"(a1), "=r"(a3)
                                 : "l"(W2
                                     + ((uint64_t)blockIdx.x * (uint32_t)H
@@ -172,9 +156,9 @@ void xR57F2_modelopt_direct_reduce_graph(
                                         + (((uint32_t)threadIdx.x >> 5) << 4)
                                         + (((uint32_t)threadIdx.x & 31u) >> 2)
                                         + 8u)
-                                        * ((uint32_t)I >> 3)
-                                    + (uint32_t)((ip << 5) + k) * 8u
-                                    + ((uint32_t)threadIdx.x & 3u))
+                                        * ((uint32_t)I >> 1)
+                                    + (uint32_t)((ip << 5) + k) * 32u
+                                    + ((uint32_t)threadIdx.x & 3u) * 4u)
                                 : "memory");
                         }
 
@@ -193,61 +177,93 @@ void xR57F2_modelopt_direct_reduce_graph(
                                         + (((uint32_t)threadIdx.x >> 5) << 4)
                                         + (((uint32_t)threadIdx.x & 31u) >> 2)
                                         + ((uint32_t)(threadIdx.x & 3) << 3))
-                                        * ((uint32_t)I >> 6)
-                                    + (uint32_t)((ip << 5) + k))
+                                        * ((uint32_t)I >> 4)
+                                    + (uint32_t)((ip << 5) + k) * 4u)
                                 : "memory");
                         }
 
-                        // lane lp: v4 = {B0[2lp:2lp+1],B1[2lp:2lp+1]}.
+                        // Exact Y4 u32[e,N,I/64,8]: one v2 per N8 fragment.
                         b00 = 0u; b01 = 0u; b10 = 0u; b11 = 0u;
                         if ((uint32_t)(n16 << 4)
                             + (((uint32_t)threadIdx.x & 31u) >> 2) < count) {
                             asm volatile(
-                                "ld.acquire.gpu.global.L2::256B.v4.u32 {%0,%1,%2,%3}, [%4];"
-                                : "=r"(b00), "=r"(b01),
-                                  "=r"(b10), "=r"(b11)
+                                "ld.acquire.gpu.global.L2::256B.v2.u32 {%0,%1}, [%2];"
+                                : "=r"(b00), "=r"(b01)
                                 : "l"(Y4
-                                    + (uint64_t)blockIdx.x * (uint32_t)NP
-                                        * ((uint32_t)I >> 3)
-                                    + (uint64_t)n16 * ((uint32_t)I << 1)
-                                    + ((uint64_t)((ip << 5) + k) << 7)
-                                    + (((uint32_t)threadIdx.x & 31u) >> 2)
-                                        * 16u
-                                    + (((uint32_t)threadIdx.x & 3u) << 2))
+                                    + (((uint64_t)blockIdx.x * (uint32_t)N
+                                        + (uint32_t)(n16 << 4)
+                                        + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                        * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k)) * 8u
+                                    + (((uint32_t)threadIdx.x & 3u) << 1))
                                 : "memory");
                         }
                         if ((uint32_t)(n16 << 4) + 8u
-                            + (((uint32_t)threadIdx.x & 31u) >> 2) >= count)
-                            b10 = b11 = 0u;
+                            + (((uint32_t)threadIdx.x & 31u) >> 2) < count) {
+                            asm volatile(
+                                "ld.acquire.gpu.global.L2::256B.v2.u32 {%0,%1}, [%2];"
+                                : "=r"(b10), "=r"(b11)
+                                : "l"(Y4
+                                    + (((uint64_t)blockIdx.x * (uint32_t)N
+                                        + (uint32_t)(n16 << 4) + 8u
+                                        + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                        * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k)) * 8u
+                                    + (((uint32_t)threadIdx.x & 3u) << 1))
+                                : "memory");
+                        }
                         scaleB0 = 0u; scaleB1 = 0u;
                         scaleB2 = 0u; scaleB3 = 0u;
-                        if (!((uint32_t)threadIdx.x & 3u)
-                            && (uint32_t)(n16 << 4)
-                                + (((uint32_t)threadIdx.x & 31u) >> 2)
-                                < count) {
-                            asm volatile(
-                                "ld.acquire.gpu.global.v4.u32 {%0,%1,%2,%3}, [%4];"
-                                : "=r"(scaleB0), "=r"(scaleB1),
-                                  "=r"(scaleB2), "=r"(scaleB3)
-                                : "l"(SY
-                                    + (uint64_t)blockIdx.x * (uint32_t)NP
-                                        * ((uint32_t)I >> 6)
-                                    + (uint64_t)(n16 >> 1)
-                                        * (((uint32_t)I >> 6) << 5)
-                                    + (uint32_t)((ip << 5) + k) * 32u
-                                    + (((uint32_t)threadIdx.x & 31u) >> 2)
-                                        * 4u)
-                                : "memory");
+                        if (!((uint32_t)threadIdx.x & 3u)) {
+                            if ((uint32_t)(n16 << 4)
+                                + (((uint32_t)threadIdx.x & 31u) >> 2) < count)
+                                asm volatile(
+                                    "ld.acquire.gpu.global.u32 %0, [%1];"
+                                    : "=r"(scaleB0)
+                                    : "l"(SY
+                                        + ((uint64_t)blockIdx.x * (uint32_t)N
+                                            + (uint32_t)(n16 << 4)
+                                            + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                            * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k))
+                                    : "memory");
+                            if ((uint32_t)(n16 << 4) + 8u
+                                + (((uint32_t)threadIdx.x & 31u) >> 2) < count)
+                                asm volatile(
+                                    "ld.acquire.gpu.global.u32 %0, [%1];"
+                                    : "=r"(scaleB1)
+                                    : "l"(SY
+                                        + ((uint64_t)blockIdx.x * (uint32_t)N
+                                            + (uint32_t)(n16 << 4) + 8u
+                                            + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                            * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k))
+                                    : "memory");
+                            if ((uint32_t)(n16b << 4)
+                                + (((uint32_t)threadIdx.x & 31u) >> 2) < count)
+                                asm volatile(
+                                    "ld.acquire.gpu.global.u32 %0, [%1];"
+                                    : "=r"(scaleB2)
+                                    : "l"(SY
+                                        + ((uint64_t)blockIdx.x * (uint32_t)N
+                                            + (uint32_t)(n16b << 4)
+                                            + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                            * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k))
+                                    : "memory");
+                            if ((uint32_t)(n16b << 4) + 8u
+                                + (((uint32_t)threadIdx.x & 31u) >> 2) < count)
+                                asm volatile(
+                                    "ld.acquire.gpu.global.u32 %0, [%1];"
+                                    : "=r"(scaleB3)
+                                    : "l"(SY
+                                        + ((uint64_t)blockIdx.x * (uint32_t)N
+                                            + (uint32_t)(n16b << 4) + 8u
+                                            + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                            * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k))
+                                    : "memory");
                         }
-                        if ((uint32_t)(n16 << 4) + 8u
-                            + (((uint32_t)threadIdx.x & 31u) >> 2) >= count)
-                            scaleB1 = 0u;
-                        if ((uint32_t)(n16b << 4)
-                            + (((uint32_t)threadIdx.x & 31u) >> 2) >= count)
-                            scaleB2 = 0u;
-                        if ((uint32_t)(n16b << 4) + 8u
-                            + (((uint32_t)threadIdx.x & 31u) >> 2) >= count)
-                            scaleB3 = 0u;
 
                         if (live16 & 0xffu) {
                             asm volatile(
@@ -273,27 +289,36 @@ void xR57F2_modelopt_direct_reduce_graph(
                                   "h"(selector0), "h"(selector0));
                         }
 
-                        // Same paired transaction for adjacent packed n16b.
+                        // Adjacent packed n16b uses the same exact row layout.
                         b00 = 0u; b01 = 0u; b10 = 0u; b11 = 0u;
                         if ((uint32_t)(n16b << 4)
                             + (((uint32_t)threadIdx.x & 31u) >> 2) < count) {
                             asm volatile(
-                                "ld.acquire.gpu.global.L2::256B.v4.u32 {%0,%1,%2,%3}, [%4];"
-                                : "=r"(b00), "=r"(b01),
-                                  "=r"(b10), "=r"(b11)
+                                "ld.acquire.gpu.global.L2::256B.v2.u32 {%0,%1}, [%2];"
+                                : "=r"(b00), "=r"(b01)
                                 : "l"(Y4
-                                    + (uint64_t)blockIdx.x * (uint32_t)NP
-                                        * ((uint32_t)I >> 3)
-                                    + (uint64_t)n16b * ((uint32_t)I << 1)
-                                    + ((uint64_t)((ip << 5) + k) << 7)
-                                    + (((uint32_t)threadIdx.x & 31u) >> 2)
-                                        * 16u
-                                    + (((uint32_t)threadIdx.x & 3u) << 2))
+                                    + (((uint64_t)blockIdx.x * (uint32_t)N
+                                        + (uint32_t)(n16b << 4)
+                                        + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                        * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k)) * 8u
+                                    + (((uint32_t)threadIdx.x & 3u) << 1))
                                 : "memory");
                         }
                         if ((uint32_t)(n16b << 4) + 8u
-                            + (((uint32_t)threadIdx.x & 31u) >> 2) >= count)
-                            b10 = b11 = 0u;
+                            + (((uint32_t)threadIdx.x & 31u) >> 2) < count) {
+                            asm volatile(
+                                "ld.acquire.gpu.global.L2::256B.v2.u32 {%0,%1}, [%2];"
+                                : "=r"(b10), "=r"(b11)
+                                : "l"(Y4
+                                    + (((uint64_t)blockIdx.x * (uint32_t)N
+                                        + (uint32_t)(n16b << 4) + 8u
+                                        + (((uint32_t)threadIdx.x & 31u) >> 2))
+                                        * ((uint32_t)I >> 6)
+                                        + (uint32_t)((ip << 5) + k)) * 8u
+                                    + (((uint32_t)threadIdx.x & 3u) << 1))
+                                : "memory");
+                        }
 
                         if (live16b & 0xffu) {
                             asm volatile(
@@ -403,6 +428,7 @@ void xR57F2_modelopt_direct_reduce_graph(
 
                     asm volatile(
                         "fence.proxy.async.shared::cta;" ::: "memory");
+                    __syncthreads();
 
                     if (((uint32_t)threadIdx.x & 31u) < 16u
                         && (uint32_t)(n16 << 4)
@@ -411,13 +437,14 @@ void xR57F2_modelopt_direct_reduce_graph(
                             + (((uint32_t)threadIdx.x >> 5) << 4)
                             + ((uint32_t)threadIdx.x & 8u) < (uint32_t)H) {
                         out0 = expert_token_idx[
-                            (uint64_t)blockIdx.x * ((uint32_t)NP + 1u) + 1u
+                            (uint64_t)blockIdx.x * ((uint32_t)N + 1u) + 1u
                             + (uint32_t)(n16 << 4)
                             + ((uint32_t)threadIdx.x & 7u)];
                         asm volatile(
                             "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.bf16 "
                             "[%0], [%1], 16;\n\t"
-                            "cp.async.bulk.commit_group;"
+                            "cp.async.bulk.commit_group;\n\t"
+                            "cp.async.bulk.wait_group.read 0;"
                             :
                             : "l"((uint64_t)__cvta_generic_to_global(
                                   Y + (uint64_t)out0 * (uint32_t)H
@@ -431,6 +458,7 @@ void xR57F2_modelopt_direct_reduce_graph(
                                   + (((uint32_t)threadIdx.x & 8u) << 4)))
                             : "memory");
                     }
+                    __syncthreads();
 
                     if (((uint32_t)threadIdx.x & 31u) < 16u
                         && (uint32_t)(n16 << 4) + 8u
@@ -439,13 +467,14 @@ void xR57F2_modelopt_direct_reduce_graph(
                             + (((uint32_t)threadIdx.x >> 5) << 4)
                             + ((uint32_t)threadIdx.x & 8u) < (uint32_t)H) {
                         out0 = expert_token_idx[
-                            (uint64_t)blockIdx.x * ((uint32_t)NP + 1u) + 1u
+                            (uint64_t)blockIdx.x * ((uint32_t)N + 1u) + 1u
                             + (uint32_t)(n16 << 4) + 8u
                             + ((uint32_t)threadIdx.x & 7u)];
                         asm volatile(
                             "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.bf16 "
                             "[%0], [%1], 16;\n\t"
-                            "cp.async.bulk.commit_group;"
+                            "cp.async.bulk.commit_group;\n\t"
+                            "cp.async.bulk.wait_group.read 0;"
                             :
                             : "l"((uint64_t)__cvta_generic_to_global(
                                   Y + (uint64_t)out0 * (uint32_t)H
@@ -467,13 +496,14 @@ void xR57F2_modelopt_direct_reduce_graph(
                             + (((uint32_t)threadIdx.x >> 5) << 4)
                             + ((uint32_t)threadIdx.x & 8u) < (uint32_t)H) {
                         out0 = expert_token_idx[
-                            (uint64_t)blockIdx.x * ((uint32_t)NP + 1u) + 1u
+                            (uint64_t)blockIdx.x * ((uint32_t)N + 1u) + 1u
                             + (uint32_t)(n16b << 4)
                             + ((uint32_t)threadIdx.x & 7u)];
                         asm volatile(
                             "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.bf16 "
                             "[%0], [%1], 16;\n\t"
-                            "cp.async.bulk.commit_group;"
+                            "cp.async.bulk.commit_group;\n\t"
+                            "cp.async.bulk.wait_group.read 0;"
                             :
                             : "l"((uint64_t)__cvta_generic_to_global(
                                   Y + (uint64_t)out0 * (uint32_t)H
@@ -495,13 +525,14 @@ void xR57F2_modelopt_direct_reduce_graph(
                             + (((uint32_t)threadIdx.x >> 5) << 4)
                             + ((uint32_t)threadIdx.x & 8u) < (uint32_t)H) {
                         out0 = expert_token_idx[
-                            (uint64_t)blockIdx.x * ((uint32_t)NP + 1u) + 1u
+                            (uint64_t)blockIdx.x * ((uint32_t)N + 1u) + 1u
                             + (uint32_t)(n16b << 4) + 8u
                             + ((uint32_t)threadIdx.x & 7u)];
                         asm volatile(
                             "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.bf16 "
                             "[%0], [%1], 16;\n\t"
-                            "cp.async.bulk.commit_group;"
+                            "cp.async.bulk.commit_group;\n\t"
+                            "cp.async.bulk.wait_group.read 0;"
                             :
                             : "l"((uint64_t)__cvta_generic_to_global(
                                   Y + (uint64_t)out0 * (uint32_t)H
@@ -516,8 +547,7 @@ void xR57F2_modelopt_direct_reduce_graph(
                             : "memory");
                     }
 
-                    asm volatile(
-                        "cp.async.bulk.wait_group.read 0;" ::: "memory");
+                    __syncthreads();
                     }
                 }
         n16 = n16b;

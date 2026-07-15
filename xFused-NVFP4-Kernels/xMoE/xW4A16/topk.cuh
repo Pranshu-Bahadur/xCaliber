@@ -19,7 +19,8 @@
       redux.sync.max.u32 elects one winner warp-wide
 
     Softmax and sigmoid are monotonic, so only selected logits are converted
-    to f32. Both paths normalize over TOPK; routed_scale is applied last.
+    to f32. Both paths normalize over TOPK; routed_scale and the optional
+    BF16 per-expert scale are applied after normalization.
 */
 template <bool SIGMOID>
 __global__ __launch_bounds__(MOE_TOPK_CTA)
@@ -27,6 +28,7 @@ void moe_topk_bf16(
     const uint16_t* __restrict__ logits,
     int32_t* __restrict__ topk_idx,
     uint16_t* __restrict__ topk_W,
+    const uint16_t* __restrict__ expert_scale,
     int N,
     int E,
     int TOPK,
@@ -119,6 +121,17 @@ void moe_topk_bf16(
 
     if (lane < (uint32_t)TOPK) {
         weight *= inv * routed_scale;
+        if (expert_scale) {
+            uint16_t h;
+            float scale;
+            asm volatile(
+                "ld.global.ca.u16 %0, [%2];\n\t"
+                "cvt.f32.bf16 %1, %0;"
+                : "=h"(h), "=f"(scale)
+                : "l"((uint64_t)__cvta_generic_to_global(
+                      expert_scale + expert)));
+            weight *= scale;
+        }
         uint16_t out;
         asm volatile("cvt.rn.bf16.f32 %0, %1;"
                      : "=h"(out) : "f"(weight));

@@ -283,12 +283,13 @@ static GraphExec build_route_graph(
     const uint16_t* logits = b.logits;
     const int32_t* topk_idx = b.topk_idx;
     const uint16_t* topk_W = b.topk_W;
+    const uint16_t* expert_scale = nullptr;
     uint16_t* topk_off = b.topk_off;
     uint16_t* expert_topk_W = b.expert_topk_W;
     uint16_t* expert_token_idx = b.expert_token_idx;
     int N = s.N, E = s.E, NP = s.NP, TOPK = s.TOPK;
     float routed_scale = 1.0f;
-    void* tk[] = {&logits, &topk_idx, &topk_W,
+    void* tk[] = {&logits, &topk_idx, &topk_W, &expert_scale,
                   &N, &E, &TOPK, &routed_scale};
     void* topk_fn = sigmoid
         ? (void*)moe_topk_bf16<true>
