@@ -5,3 +5,10 @@ __pycache__/*
 **/__pycache__/
 .codex/*
 .agents/*
+.study/
+kaggle/
+
+**/build/
+**/dist/
+**/*.egg-info/
+**/*.so

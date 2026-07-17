@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xcaliber-vllm-xr64-abs"
+version = "0.2.0"
+description = "xCaliber xR64ABS symmetric INT4 MoE plugin for vLLM"
+requires-python = ">=3.10"
+
+[project.entry-points."vllm.general_plugins"]
+xcaliber_xr64_abs = "xcaliber_int4_vllm.plugin:register"

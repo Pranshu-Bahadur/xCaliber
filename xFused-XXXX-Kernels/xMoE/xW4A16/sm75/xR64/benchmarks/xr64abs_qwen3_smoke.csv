@@ -1,0 +1,4 @@
+kind,trial,gpu,model,prompts,prompt_tokens,output_tokens,model_load_s,generation_s,aggregate_output_tok_s
+trial,0,NVIDIA RTX PRO 6000 Blackwell Server Edition,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180,471,59.973000243000115,1.7916880549996677,262.8805827474735
+trial,1,NVIDIA RTX PRO 6000 Blackwell Server Edition,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180,466,59.973000243000115,1.7875186269998267,260.6965840586148
+median,,NVIDIA RTX PRO 6000 Blackwell Server Edition,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180.0,468.5,59.973000243000115,1.7896033409997472,261.7885834030442
