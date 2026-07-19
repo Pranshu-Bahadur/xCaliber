@@ -186,10 +186,19 @@ class XCaliberR64ABSAutoRoundMoE(GPTQMarlinMoEMethod):
 
         # Gemma-4 binds a per-expert output scale via the plugin; other MoE
         # families (Qwen3.5/3.6, ...) have none, so default to unit scale.
-        per_expert_scale = getattr(layer, "_xcaliber_per_expert_scale", None)
-        if per_expert_scale is None:
+        # Attribute ABSENT = non-Gemma model (fine). Attribute present but
+        # None = the Gemma binding ran and failed to capture a scale — do not
+        # silently run Gemma with unit scales.
+        _absent = object()
+        per_expert_scale = getattr(layer, "_xcaliber_per_expert_scale", _absent)
+        if per_expert_scale is _absent:
             per_expert_scale = torch.ones(
                 E, dtype=torch.bfloat16, device=layer.w13_qweight.device
+            )
+        elif per_expert_scale is None:
+            raise RuntimeError(
+                "xR64ABS: _xcaliber_per_expert_scale is bound but None — "
+                "per-expert scale binding captured nothing"
             )
         elif per_expert_scale.numel() != E:
             raise RuntimeError(
