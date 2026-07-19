@@ -37,6 +37,7 @@ def register() -> None:
     )
     from vllm.model_executor.layers.quantization.gptq_marlin import (
         GPTQMarlinConfig,
+        GPTQMarlinMoEMethod,
     )
     from vllm.model_executor.layers.quantization.inc import INCConfig
 
@@ -75,6 +76,38 @@ def register() -> None:
 
         INCConfig.apply_gptq_quant_layer = apply_gptq_quant_layer
         INCConfig._xcaliber_abs_registered = True
+
+    # Plain-GPTQ checkpoints (quant_method "gptq", e.g. palmfuture Qwen3.6)
+    # reach FusedMoE via GPTQMarlinConfig.get_quant_method -> GPTQMarlinMoEMethod
+    # directly, bypassing the INC and compressed-tensors hooks above. Wrap
+    # get_quant_method so symmetric W4G128 (desc_act false) FusedMoE layers get
+    # our monolithic executor while everything else (Linear layers, dynamic-
+    # excluded modules that come back Unquantized, marlin-unsupported shapes
+    # that fall back to MoeWNA16) is left untouched.
+    if not getattr(GPTQMarlinConfig, "_xcaliber_abs_gptq_registered", False):
+        original_get_quant_method = GPTQMarlinConfig.get_quant_method
+
+        def gptq_get_quant_method(self, layer, prefix: str):
+            method = original_get_quant_method(self, layer, prefix)
+            if (
+                isinstance(layer, FusedMoE)
+                and type(method) is GPTQMarlinMoEMethod
+                and getattr(method, "quant_config", None) is not None
+            ):
+                qc = method.quant_config
+                if (
+                    qc.weight_bits == 4
+                    and qc.group_size == 128
+                    and qc.is_sym
+                    and not qc.desc_act
+                ):
+                    xmethod = XCaliberR64ABSAutoRoundMoE(qc, layer.moe_config)
+                    xmethod.input_dtype = getattr(method, "input_dtype", None)
+                    return xmethod
+            return method
+
+        GPTQMarlinConfig.get_quant_method = gptq_get_quant_method
+        GPTQMarlinConfig._xcaliber_abs_gptq_registered = True
 
     from vllm.model_executor.layers.quantization.gptq_marlin import (
         GPTQMarlinLinearMethod,
