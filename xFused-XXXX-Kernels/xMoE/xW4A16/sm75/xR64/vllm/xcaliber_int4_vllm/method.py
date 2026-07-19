@@ -144,8 +144,11 @@ class XCaliberR64ABSAutoRoundMoE(GPTQMarlinMoEMethod):
             raise RuntimeError("xR64ABS requires symmetric RTN/GPTQ ordering")
         if not self.moe.is_act_and_mul:
             raise RuntimeError("xR64ABS requires gated FF1")
-        if layer.shared_experts is not None:
-            raise RuntimeError("xR64ABS v0 does not support shared experts")
+        # Shared experts (Qwen3.5/3.6 MoE) are handled entirely by vLLM's
+        # DefaultMoERunner: it computes layer._shared_experts(x) separately and
+        # combines it with our routed output (see the design notes on
+        # apply_monolithic below). Our monolithic kernel only ever produces the
+        # routed contribution, so no extra work is required here.
         if layer.top_k != 8:
             raise RuntimeError(f"xR64ABS requires top_k=8, got {layer.top_k}")
 
@@ -181,9 +184,18 @@ class XCaliberR64ABSAutoRoundMoE(GPTQMarlinMoEMethod):
         ):
             raise RuntimeError("xR64ABS raw S2 tail-group layout mismatch")
 
+        # Gemma-4 binds a per-expert output scale via the plugin; other MoE
+        # families (Qwen3.5/3.6, ...) have none, so default to unit scale.
         per_expert_scale = getattr(layer, "_xcaliber_per_expert_scale", None)
-        if per_expert_scale is None or per_expert_scale.numel() != E:
-            raise RuntimeError("xR64ABS requires Gemma per_expert_scale [E]")
+        if per_expert_scale is None:
+            per_expert_scale = torch.ones(
+                E, dtype=torch.bfloat16, device=layer.w13_qweight.device
+            )
+        elif per_expert_scale.numel() != E:
+            raise RuntimeError(
+                f"xR64ABS per_expert_scale must have {E} entries, "
+                f"got {per_expert_scale.numel()}"
+            )
 
         replace_parameter(
             layer, "w13_qweight", _C.repack_gptq(layer.w13_qweight.detach())
@@ -229,12 +241,14 @@ class XCaliberR64ABSAutoRoundMoE(GPTQMarlinMoEMethod):
         )
         self._xr64_ready = True
         logger.info(
-            "xR64ABS active: E=%d H=%d I=%d S2_groups=%d activation=%s",
+            "xR64ABS active: E=%d H=%d I=%d S2_groups=%d activation=%s "
+            "shared_expert=%s",
             E,
             H,
             I,
             (I + 127) // 128,
             "gelu_tanh" if self._xr64_gelu_tanh else "swiglu",
+            getattr(layer, "shared_experts", None) is not None,
         )
 
     def apply_monolithic(
@@ -244,6 +258,11 @@ class XCaliberR64ABSAutoRoundMoE(GPTQMarlinMoEMethod):
         router_logits: torch.Tensor,
         input_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # This returns ONLY the routed-expert contribution. When the layer has
+        # a shared expert, vLLM's DefaultMoERunner computes the shared output
+        # itself (via layer._shared_experts) and adds it after this call, so
+        # returning a bare tensor here is exactly what the runner expects.
+        # Returning a (shared, routed) tuple would make the runner double-add.
         if not self._xr64_ready:
             raise RuntimeError("xR64ABS weights were not post-processed")
         if getattr(layer, "expert_map", None) is not None:
@@ -321,8 +340,9 @@ class XCaliberR64ABSCompressedTensorsMoE(
             )
         if not self.moe.is_act_and_mul:
             raise RuntimeError("xR64ABS requires gated FF1")
-        if getattr(layer, "shared_experts", None) is not None:
-            raise RuntimeError("xR64ABS v0 does not support shared experts")
+        # Shared experts are computed and combined by vLLM's DefaultMoERunner;
+        # our monolithic kernel only produces the routed contribution. See the
+        # design note on apply_monolithic below.
         if layer.top_k != 8:
             raise RuntimeError(f"xR64ABS requires top_k=8, got {layer.top_k}")
 
@@ -403,12 +423,13 @@ class XCaliberR64ABSCompressedTensorsMoE(
         self._xr64_ready = True
         logger.info(
             "xR64ABS compressed-tensors active: E=%d H=%d I=%d "
-            "activation=%s actorder=%s",
+            "activation=%s actorder=%s shared_expert=%s",
             E,
             H,
             I,
             "gelu_tanh" if self._xr64_gelu_tanh else "swiglu",
             actorder,
+            getattr(layer, "shared_experts", None) is not None,
         )
 
     def apply_monolithic(
@@ -418,6 +439,9 @@ class XCaliberR64ABSCompressedTensorsMoE(
         router_logits: torch.Tensor,
         input_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # Returns ONLY the routed contribution; vLLM's DefaultMoERunner adds the
+        # shared-expert output itself. Never return a (shared, routed) tuple
+        # here or the runner will double-add the shared output.
         if not self._xr64_ready:
             raise RuntimeError("xR64ABS weights were not post-processed")
         if getattr(layer, "expert_map", None) is not None:
