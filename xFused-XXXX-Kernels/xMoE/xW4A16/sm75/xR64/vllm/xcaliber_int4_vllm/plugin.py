@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import torch
+
 from vllm.logger import init_logger
 
 
@@ -73,6 +75,68 @@ def register() -> None:
 
         INCConfig.apply_gptq_quant_layer = apply_gptq_quant_layer
         INCConfig._xcaliber_abs_registered = True
+
+    from vllm.model_executor.layers.quantization.gptq_marlin import (
+        GPTQMarlinLinearMethod,
+    )
+
+    if not getattr(GPTQMarlinLinearMethod, "_xcaliber_ceil_scales", False):
+        # vLLM 0.19.1 sizes GPTQ scale/zero rows with FLOOR division
+        # (input_size // group_size). Checkpoints whose K is not divisible
+        # by the group size (Gemma-4 dense down_proj: K=2112, g=128 ->
+        # 16.5 groups) carry a CEIL-sized tail group (17 rows), so the
+        # floor allocation silently truncates one scale row at load time
+        # and ConchLinearKernel (which indexes ceil groups) reads one row
+        # past the tensor: NaN corruption or illegal memory access.
+        # Marlin-eligible shapes have floor == ceil, so this is a no-op
+        # for them.
+        original_linear_create_weights = GPTQMarlinLinearMethod.create_weights
+
+        def linear_create_weights(
+            self,
+            layer,
+            input_size_per_partition,
+            output_partition_sizes,
+            input_size,
+            output_size,
+            params_dtype,
+            **extra_weight_attrs,
+        ):
+            original_linear_create_weights(
+                self,
+                layer,
+                input_size_per_partition,
+                output_partition_sizes,
+                input_size,
+                output_size,
+                params_dtype,
+                **extra_weight_attrs,
+            )
+            group = self.quant_config.group_size
+            if group is None or group <= 0:
+                return
+            for name in ("scales", "qzeros"):
+                param = getattr(layer, name, None)
+                if param is None or param.data.ndim < 2:
+                    continue
+                rows = param.data.shape[0]
+                for k in (input_size, input_size_per_partition):
+                    if k % group and rows == k // group:
+                        fixed = torch.empty(
+                            (k // group + 1,) + tuple(param.data.shape[1:]),
+                            dtype=param.data.dtype,
+                            device=param.data.device,
+                        )
+                        param.data = fixed
+                        logger.info(
+                            "xCaliber ceil-scales fix: %s %s -> %s "
+                            "(K=%d, group=%d)",
+                            name, rows, k // group + 1, k, group,
+                        )
+                        break
+
+        GPTQMarlinLinearMethod.create_weights = linear_create_weights
+        GPTQMarlinLinearMethod._xcaliber_ceil_scales = True
 
     if not getattr(
         CompressedTensorsMoEMethod,
