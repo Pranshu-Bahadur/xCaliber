@@ -1,0 +1,4 @@
+kind,trial,gpu,compute_capability,model,prompts,prompt_tokens,output_tokens,model_load_s,load_peak_gib,generation_peak_gib,generation_s,aggregate_output_tok_s
+trial,0,NVIDIA L4,8.9,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180,468,171.28713809200008,19.5390625,19.552734375,3.070203976999892,152.43286879502875
+trial,1,NVIDIA L4,8.9,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180,471,171.28713809200008,19.5390625,19.552734375,3.0327279629996156,155.30572004689222
+median,,NVIDIA L4,8.9,RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16,8,180.0,469.5,171.28713809200008,19.5390625,19.552734375,3.0514659699997537,153.8692944209605

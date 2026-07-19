@@ -456,7 +456,7 @@ void moe_route_pack_topk_sidecar(
     Deterministic expert packing for the contiguous path.
 
     topk_off[token,slot]       = expert-local packed row p
-    expert_topk_W[expert,p]    = BF16 routing weight, N16 row stride
+    expert_topk_W[expert,p]    = BF16 routing weight
     expert_token_idx[expert,0] = routed row count
     expert_token_idx[expert,1+p] = original token
 
@@ -471,7 +471,7 @@ void moe_route_pack_contiguous(
     uint16_t* __restrict__ expert_topk_W,
     uint16_t* __restrict__ expert_token_idx,
     int N,
-    int NS,
+    int NP,
     int TOPK
 ) {
     __shared__ uint32_t warp_count[MOE_PREAMBLE_CTA >> 5];
@@ -480,13 +480,11 @@ void moe_route_pack_contiguous(
     uint32_t warp = (uint32_t)threadIdx.x >> 5;
     uint32_t lane = (uint32_t)threadIdx.x & 31u;
 
-    for (uint32_t p = (uint32_t)threadIdx.x; p < (uint32_t)NS;
+    for (uint32_t p = (uint32_t)threadIdx.x; p <= (uint32_t)NP;
          p += MOE_PREAMBLE_CTA) {
-        expert_topk_W[(uint64_t)e * (uint32_t)NS + p] = 0u;
-    }
-    for (uint32_t p = (uint32_t)threadIdx.x; p <= (uint32_t)N;
-         p += MOE_PREAMBLE_CTA) {
-        expert_token_idx[(uint64_t)e * ((uint32_t)N + 1u) + p] = 0u;
+        if (p < (uint32_t)NP)
+            expert_topk_W[(uint64_t)e * (uint32_t)NP + p] = 0u;
+        expert_token_idx[(uint64_t)e * ((uint32_t)NP + 1u) + p] = 0u;
     }
     if (!threadIdx.x) packed_base = 0u;
     __syncthreads();
@@ -517,9 +515,9 @@ void moe_route_pack_contiguous(
         rank += __popc(bits & ((1u << lane) - 1u));
         if (hit) {
             topk_off[token * TOPK + slot] = (uint16_t)rank;
-            expert_topk_W[(uint64_t)e * (uint32_t)NS + rank]
+            expert_topk_W[(uint64_t)e * (uint32_t)NP + rank]
                 = (uint16_t)weight;
-            expert_token_idx[(uint64_t)e * ((uint32_t)N + 1u) + 1u + rank]
+            expert_token_idx[(uint64_t)e * ((uint32_t)NP + 1u) + 1u + rank]
                 = (uint16_t)token;
         }
         __syncthreads();
@@ -532,18 +530,21 @@ void moe_route_pack_contiguous(
     }
 
     if (!threadIdx.x)
-        expert_token_idx[(uint64_t)e * ((uint32_t)N + 1u)]
+        expert_token_idx[(uint64_t)e * ((uint32_t)NP + 1u)]
             = (uint16_t)packed_base;
 }
 
 /*
-    FF1-native expert-contiguous activation layout.
+    xR64 FF1 expert-contiguous activation layout.
 
-    X4 u32[e,N,H/8] = [e,N,H/64,8]
-    Sx u32[e,N,H/64]
+    X4[e,n16,H64,q8,lp4,{n8_0x2,n8_1x2}]
+      lane lp reads both N8 fragments with one v4.
+
+    Sx[e,n32,H64,q8,{n16a_0,n16a_1,n16b_0,n16b_1}]
+      scale lane reads four adjacent N8 scales with one v4.
 
     Quantization is performed once per original token/K64.  The resulting
-    packets are scattered to its TOPK exact expert-local rows.
+    packets are scattered to its TOPK expert-local offsets.
 */
 __global__ __launch_bounds__(MOE_PREAMBLE_CTA)
 void moe_act_pack_expert_contiguous(
@@ -554,12 +555,12 @@ void moe_act_pack_expert_contiguous(
     uint32_t* __restrict__ X4,
     uint32_t* __restrict__ Sx,
     int N,
+    int NP,
     int H,
     int TOPK
 ) {
-    uint32_t n16s = ((uint32_t)N + 15u) >> 4;
-    uint32_t n16 = blockIdx.x % n16s;
-    uint32_t kt = blockIdx.x / n16s;
+    uint32_t n16 = blockIdx.x % ((uint32_t)NP >> 4);
+    uint32_t kt = blockIdx.x / ((uint32_t)NP >> 4);
     uint32_t w = (uint32_t)threadIdx.x >> 5;
     uint32_t l = (uint32_t)threadIdx.x & 31u;
 
@@ -609,13 +610,20 @@ void moe_act_pack_expert_contiguous(
 
             if (!(l & 3u)) {
                 uint32_t q8 = l >> 2;
-                X4[((uint64_t)e * (uint32_t)N + p)
-                        * ((uint32_t)H >> 3)
-                    + (kt << 3) + ((q8 & 3u) << 1) + (q8 >> 2)] = packet;
+                X4[(uint64_t)e * (uint32_t)NP * ((uint32_t)H >> 3)
+                    + (uint64_t)(p >> 4) * ((uint32_t)H << 1)
+                    + (kt << 7)
+                    + (p & 7u) * 16u
+                    + (q8 & 3u) * 4u
+                    + ((p >> 3) & 1u) * 2u
+                    + (q8 >> 2)] = packet;
             }
             if (!l) {
-                Sx[((uint64_t)e * (uint32_t)N + p)
-                    * ((uint32_t)H >> 6) + kt] = spacket;
+                Sx[(uint64_t)e * (uint32_t)NP * ((uint32_t)H >> 6)
+                    + (uint64_t)(p >> 5) * (((uint32_t)H >> 6) << 5)
+                    + kt * 32u
+                    + (p & 7u) * 4u
+                    + ((p >> 3) & 3u)] = spacket;
             }
         }
     }

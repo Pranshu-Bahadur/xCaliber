@@ -6,6 +6,7 @@ __pycache__/*
 .codex/*
 .agents/*
 .study/
+blackboard/
 kaggle/
 
 **/build/
