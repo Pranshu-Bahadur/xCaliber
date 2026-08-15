@@ -21,9 +21,21 @@ N: number of tokens (uint32_t) [typically for decode 8, 32, 64, etc; note: for t
 
 E: number of experts in the MoE layer (uint16_t) [ex: 128, 256, etc]
 
-K1 absmax quantize activations (bf16 -> NVFP4)
-K2 one-hot encode topk_indx
-[x] @TODO brb, evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff); -> yeah, staging (since nvf4) is cleaner for inference (also L2 prefetch didnt cause justifiable gain)
+FF1 Preamble:
+- K1 absmax quantize activations (bf16 -> NVFP4)
+- K2 gather perm for coalsced loads downstream (mem bound mitigate)
+
+FF1
+- Gate & Up proj, SwiGLU/GELU, topk_W
+- Stage for FF2
+
+FF2
+- Down Proj, reduce
+
+
+@TODO: change makes it super straightforward, reviewing L2 prefetch for weights (for interleaved / uncoalsced weight loads) - tradeoff intuition: the weights dont stream and if scattered act loads was good enough before, weights should be kewl 
+
+[x] (curr-prev) K2 one-hot encode topk_indx evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff); -> yeah, staging (since nvf4) is cleaner for inference (also L2 prefetch didnt cause justifiable gain) (yeah TeamWombat did this at MLSys too)
 
 
 
