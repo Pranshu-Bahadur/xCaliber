@@ -44,6 +44,8 @@ note: PDL just opened up (i think pi does ff1ff2 in a single launch)
 
 qn: how can we optimize for throughput and latency, while maintaining backward compatibility and portability
 qn: is there a sicker formulation? 
+    @TODO [evaluate ROI for HexLift-4 (FF2) in my submission file somewhere from the cholesky gpumode comp](https://www.gpumode.com/leaderboard/776?tab=rankings)
+    - this is a decomposition of f32/bf16 to multiple 4bit elements (using s2f6)
 
 K0 topk (deferred): 
           - GIVEN:  router_logits (bf16, f32); Shape (N, E)
