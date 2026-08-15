@@ -40,7 +40,10 @@ note: PDL just opened up (i think pi does ff1ff2 in a single launch)
 [x] (curr-prev) K2 one-hot encode topk_indx evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff); -> yeah, staging (since nvf4) is cleaner for inference (also L2 prefetch didnt cause justifiable gain) (yeah TeamWombat did this at MLSys too)
 
 
+@TODO: prolly drawing upon Colfax NVFP4 + cute dsl is the better play at this point
 
+qn: how can we optimize for throughput and latency, while maintaining backward compatibility and portability
+qn: is there a sicker formulation? 
 
 K0 topk (deferred): 
           - GIVEN:  router_logits (bf16, f32); Shape (N, E)
