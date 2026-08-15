@@ -23,18 +23,17 @@ E: number of experts in the MoE layer (uint16_t) [ex: 128, 256, etc]
 
 FF1 Preamble:
 - K1 absmax quantize activations (bf16 -> NVFP4)
-- K2 gather perm for coalsced loads downstream (mem bound mitigate)
+- K2 scatter perm for coalesced loads downstream (mem bound mitigate)
 
 FF1
 - Gate & Up proj, SwiGLU/GELU, topk_W 
 - mathy call: topk_W mul can be done before FF2 [arXiv 2603.07685](https://arxiv.org/pdf/2603.07685)
-- Stage for FF2
+- Stage for FF2 (quantize outputs)
 
 FF2
 - Down Proj, reduce
 
 note: PDL just opened up (i think pi does ff1ff2 in a single launch)
-
 
 @TODO: change makes it super straightforward, reviewing L2 prefetch for weights (for interleaved / uncoalsced weight loads) - tradeoff intuition: the weights dont stream and if scattered act loads was good enough before, weights should be kewl 
 
