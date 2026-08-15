@@ -23,7 +23,7 @@ E: number of experts in the MoE layer (uint16_t) [ex: 128, 256, etc]
 
 K1 absmax quantize activations (bf16 -> NVFP4)
 K2 one-hot encode topk_indx
-@TODO brb, evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff)  
+[x] @TODO brb, evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff); -> yeah, staging (since nvf4) is cleaner for inference (also L2 prefetch didnt cause justifiable gain)
 
 
 
