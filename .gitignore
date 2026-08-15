@@ -1,3 +1,11 @@
+.vscode/
+.venv/
+.codex/
+.codex/*
+.build/
+.build/*
+.agents/
+.agents/*
 .vscode/*
 .venv/*
 .agents/*
@@ -8,6 +16,7 @@ __pycache__/*
 .study/
 blackboard/
 kaggle/
+gpumode/
 
 **/build/
 **/dist/
