@@ -10,7 +10,6 @@ Upon the general challenges in Sparse MoE, our targeted architecture and floatin
 
 2. NVFP4: this floating point format is not backward compatible, which prevents us to "plug-and-play" Ampere era kernels (Marlin for instance dequantizes NVFP4->bf16 on the fly for backward comptiblility). This solves, the problem of compatibility, but leaves compute on the table. Mainly being 16-bit mma throughput being 3.5x slower than NVFP4 mma.
 
-
 Co-design overview:
 
 We define our Sparse MoE operator through a sequence of kernel launches - fusing multiple sub-operations for maximizing throughput.
@@ -18,12 +17,18 @@ We define our Sparse MoE operator through a sequence of kernel launches - fusing
 Notation:
 N: number of tokens (uint32_t) [typically for decode 8, 32, 64, etc; note: for training this can be 16384, 32768, etc]
 
-> Our main focus is consumer-grade arch inference
+> Our main focus is production-grade arch inference
 
 E: number of experts in the MoE layer (uint16_t) [ex: 128, 256, etc]
 
-K1 topk: 
+K1 absmax quantize activations (bf16 -> NVFP4)
+K2 one-hot encode topk_indx
+@TODO brb, evaluate perm expand instead: intuition FF2 uses E, N*TOPK if we're not doing topk why not just quantize -> perm for FF1? (note its been a month, so i dont recall this tradeoff)  
 
+
+
+
+K0 topk (deferred): 
           - GIVEN:  router_logits (bf16, f32); Shape (N, E)
                     TOPK (uint32) (assumption: power of 2)
           - OPTIONAL: EXPERT_SCALE (bf16, f32)
@@ -31,6 +36,8 @@ K1 topk:
           - RETURNS:
                     topk_idx (uint32_t); Shape ()
           - MODES: SIGMOID, SOFTMAX
+
+
 
 @TODO: Dual-Sparse MoE
 @TODO: topk re-work and support for modes (+streams for k1, k2); current implementation is meh (can be better imo)
