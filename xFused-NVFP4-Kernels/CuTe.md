@@ -1,4 +1,4 @@
-$\S \exists \Gamma := \{ \gamma \in \mathbb{N} | \gamma \geq 0 \}$
+$\S \exists \Gamma := \{ \gamma \in \mathbb{N} \: | \: \gamma \geq 0 \}$
 
 next i need powerset...then magma?
 
