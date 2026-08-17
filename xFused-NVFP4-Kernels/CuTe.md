@@ -1,5 +1,6 @@
 $$\S \exists \P := \{ p \in \mathbb{N} \: | \: p \geq 0 \}$$
 
-Then $\mathbb{P}( \P )$ is a (recursive) power-set.
+$\Gamma : \P^{*} \times \Z^+$
 
-Note: $$\P \in \mathbb{P}(\P)$$
+
+@TODO: read ahead
