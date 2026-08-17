@@ -1,9 +1,14 @@
-$\S \exists \P := \{ p \in \mathbb{N} \: | \: p \geq 0 \}$
+$\S \exists\P := \{p \in \N \: | \: p \geq 0\}$
+
+$\S \exists F$ a field over $\N$
+
+$\P \subset \N \implies \P \subset F$
+
+$\S \exists\mathbb{P}(\P)^*_0:=\P$
+
+$P : = \{\mathbb P(\P)^{*}_{z}
+\cup
+\mathbb P(\P)^{*}_{z-1} \: | \: \forall z\in\mathbb Z^+\}$
 
 
 
-
-$\mathbb{P}(\P) := \cup_{z\in\Z^+} \mathbb{P}(\P)^{z}$
-
-
-$\Pi(\mathbb{P}(\P)) := \{\times x : (p)^* \in \mathbb{P}(\P), \forall x \in (p)^*\}$
