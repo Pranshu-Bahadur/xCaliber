@@ -1,5 +1,7 @@
 $\S \exists \Gamma := \{ \gamma \in \mathbb{N} | \gamma \geq 0 \}$
 
+next i need powerset...then magma?
+
 note:
 im opting for set builder notation, instead of ...rings (?), the issue is defining group with powerset....
 ...im noob...this 1 line took 1hr...
