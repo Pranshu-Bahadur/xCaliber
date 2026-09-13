@@ -1,4 +1,4 @@
-# xSuperSonicMoE
+# xCalibur: SuperSonicMoE
 aim: reach sol perf
 ---
 
