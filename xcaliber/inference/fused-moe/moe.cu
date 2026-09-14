@@ -29,26 +29,20 @@ __global__ void topk(
     const int N,
     const int E
 ){
-
     constexpr float D1 = 4.0f / sizeof(T);
     constexpr int T1 = ((((int)(E / D1)) >> 5));
     cg::thread_block cta = cg::this_thread_block();
-
     const int64_t tid = cta.thread_rank();
     const dim3 tidC = cta.thread_index(); // coordinates
-    
-    // warp-level pre-emption: acc to N
-
     const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.x) << 3));
-
     float rA[64];
-    float rS = 0.0f;
-
+    float rW  = 0.0f;
+    // warp-level pre-emption: acc to N
     for (int i = 0; i < T1 + 8; i += 8)) {
-
-        if (i){
+        if (i){   
             #pragma unroll 8
             for (int j = i-8; j < 8; j++) {
+            
                 asm volatile(
                     "ex2.approx.f32 %0, %1;\n\t"
                     : "=r"((uint32_t)(rA + j))
@@ -56,18 +50,15 @@ __global__ void topk(
                 );
 
                 if (softmax) {
-                    rS = rS + rA[j];
+                    rW  = rA[j] + rW;
                 }
             }
         }
-
         if (i < T1) {
             asm volatile(
                 ".reg .b32 tmp;\n\t"
                 "ld.global.acquire.gpu.v8.b32 tmp, [%1];\n\t"
-                ""
-                ""
-                : "=r"((rA + i))
+                : "=r"((uint32_t)(rA + i))
                 : "l"((uint64_t)__cvta_global_to_generic(router_logits + offset + i))
                 )
             );
