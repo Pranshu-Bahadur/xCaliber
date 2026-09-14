@@ -7,10 +7,7 @@
 #include <cooperative_groups.h>
 #include <cute/tensor.hpp>
 #include <type_traits>
-
 namespace cg = cooperative_groups;
-
-
 /*
 
     Computes the indices of top `K` experts `E` per token `N`; 
@@ -18,7 +15,6 @@ namespace cg = cooperative_groups;
     optionally sums (if given) `e_correction_bias` before `argmax`.
 
 */
-
 template <typename T, bool softmax>
 __global__ void topk(
     const T* router_logits,
@@ -34,7 +30,7 @@ __global__ void topk(
     cg::thread_block cta = cg::this_thread_block();
     const int64_t tid = cta.thread_rank();
     const dim3 tidC = cta.thread_index(); // coordinates
-    const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.x) << 3));
+    const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.z) << 3));
     float rA[64];
     float rW  = 0.0f;
     // warp-level pre-emption: acc to N
