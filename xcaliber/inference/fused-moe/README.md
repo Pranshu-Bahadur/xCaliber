@@ -2,7 +2,7 @@
 aim: reach sol perf
 ---
 
-1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1)`
+1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1), topk_weights o (N, K):(K, 1)`
 
 computes the indices of top `K` experts `E` per token `N`; 
 based of an activation over `router_logits` (`sigmoid`, `softmax`);

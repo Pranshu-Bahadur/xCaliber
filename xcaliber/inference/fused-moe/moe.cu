@@ -6,9 +6,10 @@
 #include <cfloat>
 #include <cooperative_groups.h>
 #include <cute/tensor.hpp>
-
+#include <type_traits>
 
 namespace cg = cooperative_groups;
+
 
 /*
 
@@ -18,15 +19,19 @@ namespace cg = cooperative_groups;
 
 */
 
+template <typename T, bool softmax>
 __global__ void topk(
     const T* router_logits,
-    int32_t* topk_idx,
-    const int32_t K,
-    const int32_t N,
-    const int32_t E
+    int* topk_idx,
+    __nv_bfloat16* topk_weights,
+    const float* e_correction_bias = nullptr,
+    const int K,
+    const int N,
+    const int E
 ){
 
     constexpr float D1 = 4.0f / sizeof(T);
+    constexpr int T1 = ((((int)(E / D1)) >> 5));
     cg::thread_block cta = cg::this_thread_block();
 
     const int64_t tid = cta.thread_rank();
@@ -34,29 +39,40 @@ __global__ void topk(
     
     // warp-level pre-emption: acc to N
 
+    constexpr uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.x) << 3));
 
-    constexpr uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) +
-                                (uint64_t)(((tidC.y + tidC.x) << 3));
-    uint32_t rA[96];
+    float rA[64];
+    float rS = 0.0f;
 
-    float32_t rM[32] = {0.0f};
-
-
-    for (int32_t i = 0; i < ((((int32_t)(E / D1)) >> 5) + 8); i += 8)) {
-
+    for (int i = 0; i < T1 + 8; i += 8)) {
 
         if (i){
-            //computation
-            //
+            #pragma unroll 8
+            for (int j = i-8; j < 8; j++) {
+                asm volatile(
+                    "ex2.approx.f32 %0, %1;\n\t"
+                    : "=r"((uint32_t)(rA + j))
+                    : "r"((uint32_t)(rA + j))
+                );
+
+                if (softmax) {
+                    rS = rS + rA[j];
+                }
+            }
+            
         }
 
-
-        asm volatile(
-            "ld.global.acquire.gpu.v8.b32 %0, [%1];\n\t"
-            : "=r"(rA + i)
-            : "l"((uint64_t)__cvta_global_to_generic(offset + i))
-            )
-        );
+        if (i < T1) {
+            asm volatile(
+                ".reg .b32 tmp;\n\t"
+                "ld.global.acquire.gpu.v8.b32 tmp, [%1];\n\t"
+                ""
+                ""
+                : "=r"((rA + i))
+                : "l"((uint64_t)__cvta_global_to_generic(router_logits + offset + i))
+                )
+            );
+        }
 
 
     }   
