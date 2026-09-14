@@ -2,15 +2,17 @@
 aim: reach sol perf
 ---
 
-
 1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1)`
 ---
 
-variations:
-- [ ] bf16 [e_correction_bias]
-- [ ] sigmoid
-- [ ] softmax
-- [ ] float32
+computes the indices of top `K` experts `E` per token `N`; 
+based of an activation over `router_logits` (`sigmoid`, `softmax`);
+optionally sums (if given) `e_correction_bias` before `argmax`.
+
+challenges:
+* `router_logits` can be either `bf16`, `f32` (depending on the llm family)
+* for this repo the co-design needs to support training (large `N`)
+  and inference (rel. small `N`).
 
 `N>E -> (E, 1)`
 
