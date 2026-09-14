@@ -10,6 +10,7 @@ optionally sums (if given) `e_correction_bias` before `argmax`.
 
 challenges:
 * `router_logits` can be either `bf16`, `f32` (depending on the llm family)
+    solution: cute actually solves this
 * for this repo the co-design needs to support training (large `N`)
   and inference (rel. small `N`).
 
@@ -21,6 +22,8 @@ topk operation itself (after act and stuff) is recursive.
 * quicksort-esq procedure until topk?
 
 use cute algebra (f2/idx2crd/crd2idx) for `topk_idx` calc?
+
+CTA 256 $\rightarrow$ `(8, 4, 8)`
 
 ---
 
