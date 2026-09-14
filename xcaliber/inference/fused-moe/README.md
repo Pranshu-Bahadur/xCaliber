@@ -36,3 +36,6 @@ optional: topk_idx2crd/f2
 
 arch
 1. sm120: bf16, fp8, nvf4
+
+
+`moe.py`: cpu based implementation, using `pycute` (to assist with the co-design process).
