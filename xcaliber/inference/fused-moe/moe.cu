@@ -39,7 +39,7 @@ __global__ void topk(
     
     // warp-level pre-emption: acc to N
 
-    constexpr uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.x) << 3));
+    const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.x) << 3));
 
     float rA[64];
     float rS = 0.0f;
@@ -59,7 +59,6 @@ __global__ void topk(
                     rS = rS + rA[j];
                 }
             }
-            
         }
 
         if (i < T1) {
@@ -73,7 +72,5 @@ __global__ void topk(
                 )
             );
         }
-
-
     }   
 }
