@@ -42,13 +42,11 @@ __global__ void topk(
         if (i){   
             #pragma unroll 8
             for (int j = i-8; j < 8; j++) {
-            
                 asm volatile(
                     "ex2.approx.f32 %0, %1;\n\t"
                     : "=r"((uint32_t)(rA + j))
                     : "r"((uint32_t)(rA + j))
                 );
-
                 if (softmax) {
                     rW  = rA[j] + rW;
                 }
