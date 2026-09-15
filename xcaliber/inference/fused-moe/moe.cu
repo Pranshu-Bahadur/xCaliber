@@ -114,7 +114,7 @@ __global__ void topk(
             tmp.y = __shfl_xor_sync(0xffff'ffffu, local_topk[i].y, j, 4);
             if (local_minmax[1].x > tmp.x){
                 local_topk[i] = tmp[k];
-                for (int k = 0; k < K; k++) {
+                for (int k = 0; k <= i; k++) {
                     if (local_minmax[1].x > local_topk[k].x){
                         local_minmax[1] = local_topk[k];
                     }
