@@ -30,14 +30,20 @@ __global__ void topk(
     cg::thread_block cta = cg::this_thread_block();
     const int64_t tid = cta.thread_rank();
     const dim3 tidC = cta.thread_index(); // coordinates
-    const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + (uint64_t)(((tidC.y + tidC.z) << 3));
+    const uint64_t e_offset = (uint64_t)(((tidC.y + tidC.z) << 3));
+    const uint64_t offset = (uint64_t)(blockIdx.x * tidC.x * E) + e_offset);
     float rA[64];
     float rW  = 0.0f;
+    uint2 local_topk[K];
+    uint2 local_minmax[2] = {
+                                make_uint2(0xffff'ffffu, 0u),
+                                make_uint2(0u, 0u)
+                            };
     // warp-level pre-emption: acc to N
     for (int i = 0; i < T1 + 8; i += 8)) {
-        if (i){   
+        if (i) {   
             #pragma unroll 8
-            for (int j = i-8; j < 8; j++) {
+            for (int j = i-8; j < i; j++) {
                 asm volatile(
                     "ex2.approx.f32 %0, %1;\n\t"
                     : "=r"((uint32_t)(rA + j))
@@ -45,6 +51,32 @@ __global__ void topk(
                 );
                 if (softmax) {
                     rW  = rA[j] + rW;
+                }
+                if (j<K) {
+                    local_topk[j].x = __float_as_uint(rA[j]);
+                    local_topk[j].y = (uint32_t)(e_offset + j);
+                    if (local_minmax[0].x < local_topk[j].x){
+                        local_minmax[0] = local_topk[j];
+                    }
+                    
+                    if (local_minmax[1].x > local_topk[j].x){
+                        local_minmax[1] = local_topk[j];
+                    }
+                }
+                else {
+                    if (local_minmax[1].x < __float_as_uint(rA[j])){
+                        local_topk[local_minmax[1].y - e_offset].x = __float_as_uint(rA[j]);
+                        local_topk[local_minmax[1].y - e_offset].y = (uint32_t)(e_offset + j);
+                        local_minmax[1] = local_minmax[0];
+                        for (int k = 0; k < K; k++) {
+                            if (local_minmax[1].x > local_topk[k].x){
+                                local_minmax[1] = local_topk[k];
+                            }
+                            if (local_minmax[0].x < local_topk[k].x){
+                                local_minmax[0] = local_topk[k];
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -57,5 +89,8 @@ __global__ void topk(
                 )
             );
         }
-    }   
+    }
+    
+    
+    
 }
