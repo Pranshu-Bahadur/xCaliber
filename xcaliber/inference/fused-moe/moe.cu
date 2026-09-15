@@ -125,4 +125,6 @@ __global__ void topk(
             }
         }
     }
+    if (!(((tidC.y << 3) + tidC.z) & 3)) {
+    }
 }
