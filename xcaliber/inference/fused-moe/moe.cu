@@ -25,8 +25,8 @@ __global__ void topk(
     const int N,
     const int E
 ){
-    constexpr float D1 = 4.0f / sizeof(T);
-    constexpr int T1 = ((((int)(E / D1)) >> 5));
+    constexpr int D1 = (int)(sizeof(T) / 4.0f);
+    constexpr int T1 = ((((int)(E * D1)) >> 5));
     cg::thread_block cta = cg::this_thread_block();
     const int64_t tid = cta.thread_rank();
     const dim3 tidC = cta.thread_index(); // coordinates
@@ -51,6 +51,9 @@ __global__ void topk(
                 );
                 if (softmax) {
                     rW  = rA[j] + rW;
+                }
+                else{
+                    rA[j] = 1.0f / (1.0f + (1.0f / rA[j]));
                 }
                 if (j<K) {
                     local_topk[j].x = __float_as_uint(rA[j]);
@@ -90,7 +93,36 @@ __global__ void topk(
             );
         }
     }
-    
-    
-    
+    uint2 tmp;
+    #pragma unroll 2
+    for (int i = 0; i < 2; i++) {
+        #pragma unroll 2
+        for (int j = 1; j <= 2; j <<= 1) {
+            tmp.x = __shfl_xor_sync(0xffff'ffffu, local_minmax[i].x, j, 4);
+            tmp.y = __shfl_xor_sync(0xffff'ffffu, local_minmax[i].y, j, 4);
+            if ((!i) && local_minmax[i].x < tmp.x) {
+                local_minmax[i] = tmp;
+            }
+            if (i && local_minmax[i].x > tmp.x) {
+                local_minmax[i] = tmp;
+            }
+        }
+    }
+    for (int i = 0; i < K; i++) {
+        for (int j = 1; j <= 2; j <<= 1) {
+            tmp.x = __shfl_xor_sync(0xffff'ffffu, local_topk[i].x, j, 4);
+            tmp.y = __shfl_xor_sync(0xffff'ffffu, local_topk[i].y, j, 4);
+            if (local_minmax[1].x > tmp.x){
+                local_topk[i] = tmp[k];
+                for (int k = 0; k < K; k++) {
+                    if (local_minmax[1].x > local_topk[k].x){
+                        local_minmax[1] = local_topk[k];
+                    }
+                    if (local_minmax[0].x < local_topk[k].x){
+                        local_minmax[0] = local_topk[k];
+                    }
+                }
+            }
+        }
+    }
 }
