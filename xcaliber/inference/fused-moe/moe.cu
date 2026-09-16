@@ -41,7 +41,9 @@ __global__ void topk(
             make_uint2(0u, 0u),    
             make_uint2(0xffff'ffffu, 0u)
         };
-    // warp-level pre-emption: acc to N
+    if ((uint64_t)(((blockIdx.x << 3) + tidC.z)) > N) {
+        return;
+    }
     for (int i = 0; i < T1 + 8; i += 8)) {
         if (i) {   
             #pragma unroll 8
