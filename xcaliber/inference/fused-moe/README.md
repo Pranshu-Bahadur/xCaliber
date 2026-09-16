@@ -8,20 +8,10 @@ computes the indices of top `K` experts `E` per token `N`;
 based of an activation over `router_logits` (`sigmoid`, `softmax`);
 optionally sums (if given) `e_correction_bias` before `argmax`.
 
-challenges:
-* `router_logits` can be either `bf16`, `f32` (depending on the llm family)
-    solution: cute actually solves this
-* for this repo the co-design needs to support training (large `N`)
-  and inference (rel. small `N`).
-
-`N>E -> (E, 1)`
-
 topk operation itself (after act and stuff) is recursive.
 
 * each thread can hold at least 2 elements (max) -> $\frac{n^2}{2} \times \cdots \times \frac{(n-k-1)^2}{2}$ `for-each topk`
 * quicksort-esq procedure until topk?
-
-use cute algebra (f2/idx2crd/crd2idx) for `topk_idx` calc?
 
 CTA 256 $\rightarrow$ `(8, 4, 8)`
 
@@ -36,6 +26,3 @@ optional: topk_idx2crd/f2
 
 arch
 1. sm120: bf16, fp8, nvf4
-
-
-`moe.py`: cpu based implementation, using `pycute` (to assist with the co-design process).
