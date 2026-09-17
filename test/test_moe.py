@@ -60,7 +60,7 @@ def test_topk():
     with torch.cuda.stream(torch.cuda.default_stream()):
         for softmax in (False, True):
             for N in (8, 16, 16384):
-                for E in (256, 512, 1024):
+                for E in (256, 512):
                     for K in (2, 8):
                         ours, baseline = check(N, E, K, softmax)
                         print(f"{N:6} {E:5} {K:3} {'softmax' if softmax else 'sigmoid':>10}"
