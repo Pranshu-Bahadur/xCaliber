@@ -36,6 +36,7 @@ __global__ void topk_kernel(
     float rW  = 0.0f;
     uint2 tmp;
     uint2 local_topk[16];
+    uint2 global_topk[16];
     uint2 local_minmax[2] = {
             make_uint2(0u, 0u),    
             make_uint2(0xffff'ffffu, 0u)
