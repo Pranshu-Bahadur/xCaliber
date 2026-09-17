@@ -114,12 +114,12 @@ __global__ void topk_kernel(
         for (int i = 16; i > 0; i >>= 1) {
             rW = rW + __shfl_xor_sync(0xffff'ffffu, rW, i);
         }
+        asm volatile("rcp.approx.ftz.f32 %0, %1;\n\t"
+            : "=f"(rW) 
+            : "f"(rW)
+        );
         #pragma unroll 8
-        for (int i = 0; i < K; i++) {
-            asm volatile("rcp.approx.ftz.f32 %0, %1;\n\t"
-                : "=f"(rW) 
-                : "f"(rW)
-            );
+        for (int i = 0; i < K; i++) {  
             local_topk[i].x = __float_as_uint(fmaf(__uint_as_float(local_topk[i].x), rW, 0.0f));
         }
     }
