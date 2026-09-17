@@ -19,9 +19,5 @@ Ok, now that we've set the stage, it's time for us to lock-in.
 
 `topk : router_logits o (N, E):(1, N)` $\rightarrow$ `(topk_idx o (N, K):(1, K), topk_weights o (N, K):(1, K))`
 
-2. gather and permute
-
-Note: This is an optimization choice, after considering trade-offs. Mainly, the extra space required by this kernel is offset by needing ~67% of that additional space for the down projection phase anyway. It is our opinion that scattered loads pose an avoidable bottleneck (even with optimized prefetching).
-
-We will supply experiments to back our claims (but it's physics at the end of the day).
+@TODO: add 1hot encoding (SonicMoE is right, due to L2 cache reuse) //still evaluating
 
