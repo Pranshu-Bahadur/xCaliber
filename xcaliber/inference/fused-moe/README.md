@@ -2,7 +2,12 @@
 aim: reach sol perf
 ---
 
+2. [gather/permute]
+
+
 1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1), topk_weights o (N, K):(K, 1)`
+
+baseline / fallback
 
 computes the indices of top `K` experts `E` per token `N`; 
 based of an activation over `router_logits` (`sigmoid`, `softmax`);
@@ -16,9 +21,8 @@ topk operation itself (after act and stuff) is recursive.
 CTA 256 $\rightarrow$ `(8, 4, 8)`
 
 ---
-
-2. [quantize]
-3. [gather/permute]
+3. topk -> 1hot
+4. [quantize]
 4. ff1, megatron trick, act, [quantize], [scatter]
 5. ff2, reduce
 

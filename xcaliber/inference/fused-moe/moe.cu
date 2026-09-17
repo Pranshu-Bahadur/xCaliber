@@ -29,7 +29,7 @@ __global__ void topk(
     const int T1 = ((((int)(E * D1)) >> 5));
     cg::thread_block cta = cg::this_thread_block();
     const int64_t tid = cta.thread_rank();
-    const dim3 tidC = cta.thread_index(); // coordinates
+    const dim3 tidC = cta.thread_index();
     const uint64_t e_offset = (uint64_t)((((tidC.y << 3) + tidC.x) << 3));
     const uint64_t offset = (uint64_t)(((blockIdx.x << 3) + tidC.z) * E) + e_offset);
     float rA[64];
