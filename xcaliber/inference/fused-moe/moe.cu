@@ -89,7 +89,7 @@ __global__ void topk(
         }
         if (i < T1) {
             asm volatile(
-                "ld.global.acquire.gpu.v8.b32 %0, [%1];\n\t"
+                "ld.global.cs.acquire.gpu.v4.b32.L2::256B %0, [%1];\n\t"
                 : "=r"((uint32_t)(rA + i))
                 : "l"((uint64_t)__cvta_generic_to_global(router_logits + offset + ((uint64_t)i << 5)))
                 )
@@ -136,6 +136,6 @@ __global__ void topk(
         topk_idx[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = global_topk[(tid & 15)].y;
     }
     if ((!((tid & 31) >> 4)) && ((tid & 15) < K)) {
-        topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __uint_as_float(global_topk[(tid & 15)].x); //cvt to bf16
+        topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __float2bfloat16(__uint_as_float(global_topk[(tid & 15)].x)); //cvt to bf16
     }
 }

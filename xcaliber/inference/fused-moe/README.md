@@ -1,13 +1,9 @@
 # xCalibur: SuperSonicMoE
 aim: reach sol perf
 ---
-
-2. [gather/permute]
-
+> The MoE operator can be defined through the following sub-operators.
 
 1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1), topk_weights o (N, K):(K, 1)`
-
-baseline / fallback
 
 computes the indices of top `K` experts `E` per token `N`; 
 based of an activation over `router_logits` (`sigmoid`, `softmax`);
@@ -21,6 +17,8 @@ topk operation itself (after act and stuff) is recursive.
 CTA 256 $\rightarrow$ `(8, 4, 8)`
 
 ---
+
+2. [gather/permute]
 3. topk -> 1hot
 4. [quantize]
 4. ff1, megatron trick, act, [quantize], [scatter]
@@ -29,4 +27,5 @@ CTA 256 $\rightarrow$ `(8, 4, 8)`
 optional: topk_idx2crd/f2
 
 arch
-1. sm120: bf16, fp8, nvf4
+1. sm89: bf16
+2. sm120: bf16, fp8, nvf4

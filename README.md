@@ -1,4 +1,4 @@
-# xCaliber
+# xCalibur
 
 aim: learn cute algebra, have fun.
 
