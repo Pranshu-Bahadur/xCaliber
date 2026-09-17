@@ -48,16 +48,27 @@ __global__ void topk(
         if (i) {   
             #pragma unroll 8
             for (int j = i-8; j < i; j++) {
-                asm volatile(
-                    "ex2.approx.f32 %0, %1;\n\t"
-                    : "=r"((uint32_t)(rA + j))
-                    : "r"((uint32_t)(rA + j))
-                );
                 if (softmax) {
-                    rW  = rA[j] + rW;
+                    rA[j] = rA[j] * 1.4426950408889634f;
+                    asm volatile(
+                        "ex2.approx.ftz.f32 %0, %1;\n\t"
+                        : "=f"(rA[j])
+                        : "f"(rA[j])
+                    );
+                    rW  += rA[j];
                 }
-                else{
-                    rA[j] = 1.0f / (1.0f + (1.0f / rA[j]));
+                else {
+                    rA[j] = -rA[j] * 1.4426950408889634f;
+                    asm volatile(
+                        "ex2.approx.ftz.f32 %0, %1;\n\t"
+                        : "=f"(rA[j])
+                        : "f"(rA[j])
+                    );
+                    rA[j] + 1.0f;
+                    asm volatile("rcp.approx.ftz.f32 %0, %1;"
+                        : "=f"(rA[j]) 
+                        : "f"(rA[j])
+                    );
                 }
                 if (j<K) {
                     local_topk[j].x = __float_as_uint(rA[j]);
@@ -103,7 +114,11 @@ __global__ void topk(
         }
         #pragma unroll K
         for (int i = 0; i < K; i++) {
-            local_topk[i].x = __float_as_uint(__uint_as_float(local_topk[i].x) / rW);
+            asm volatile("rcp.approx.ftz.f32 %0, %1;\n\t"
+                : "=f"(rW) 
+                : "f"(rW)
+            );
+            local_topk[i].x = __float_as_uint(fmaf(__uint_as_float(local_topk[i].x), rW, 0.0f));
         }
     }
     #pragma unroll K
@@ -136,6 +151,6 @@ __global__ void topk(
         topk_idx[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = global_topk[(tid & 15)].y;
     }
     if ((!((tid & 31) >> 4)) && ((tid & 15) < K)) {
-        topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __float2bfloat16(__uint_as_float(global_topk[(tid & 15)].x)); //cvt to bf16
+        topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __float2bfloat16(__uint_as_float(global_topk[(tid & 15)].x));
     }
 }
