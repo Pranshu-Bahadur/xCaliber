@@ -21,7 +21,28 @@ Ok, now that we've set the stage, it's time for us to lock-in.
 
 2. gather
 
-@TODO: add 1hot encoding (SonicMoE is right, due to L2 cache reuse) //still evaluating
+> Reverse maps token `N` idx to experts, each token corresponds to `K` unique experts `E`.
 
-this needs to be done in a way such that decoding is easy (explore cute)
+3. ff1 `(Gate | Up)_proj` $\rightarrow$ SwiGLU/GeLU $\rightarrow$ `topk_weights` $\rightarrow$ packed write out
+
+4. ff2 `Down_proj` $\rightarrow$ reduce + write out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
