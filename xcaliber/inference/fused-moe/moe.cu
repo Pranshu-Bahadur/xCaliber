@@ -6,7 +6,6 @@
 #include <tuple>
 #include <cfloat>
 #include <cooperative_groups.h>
-#include <cute/tensor.hpp>
 #include <type_traits>
 namespace cg = cooperative_groups;
 /*
