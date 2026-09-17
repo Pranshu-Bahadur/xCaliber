@@ -158,17 +158,6 @@ __global__ void topk_kernel(
     }
 }
 
-
-__global__ void ff1(
-    const __nv_bfloat16* W13, // (E, H, I) : (1, E, H)
-    const __nv_bfloat16* X, // (E, N, I)
-    __nv_bfloat16* Y,
-
-){
-
-}
-
-
 void topk(
     at::Tensor router_logits,
     at::Tensor topk_idx,
