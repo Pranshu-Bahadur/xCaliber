@@ -1,39 +1,27 @@
-xCalibur: SuperSonicMoE
+# xCalibur: SuperSonicMoE
+target: sm120a, sm89
 
 > Background story: The SuperSonicMoE operator aims to be the spiritual successor to SonicMoE. However, the operator strives to be a successor in name only, as (much like a problem child) it tends to disagree with its ancestor at nearly every design decision (mostly). Jokes aside, xCalibur has nothing but the utmost respect for SonicMoE. Our only hope is that we live up to the name.
 
 ## Problem statement:
 
-    Mixture of experts (MoE), make up ~90% of LLMs (this is before skynet, ofc., 2026). However, relative to other layers that make up our baby terminators, MoE has had little love by the GPU kernel ninjas. Primarily because it's hella boring or maybe it's because the kages don't care as much. Eitherway, it's a critical bottleneck, perfect for xCalibur to give it a go.
+> Mixture of experts (MoE), make up ~90% of LLMs (this is before skynet, ofc., 2026). However, relative to other layers that make up our baby terminators, MoE has had little love by the GPU kernel ninjas. Primarily because it's hella boring or maybe it's because the kages don't care as much. Eitherway, it's a critical bottleneck, perfect for xCalibur to give it a go.
 
-    Ok, now that we've set the stage, it's time for us to lock-in.
+Ok, now that we've set the stage, it's time for us to lock-in.
 
 ## Formulation:
 
----
 > The MoE operator can be defined through the following sub-operators.
 
-1. `topk: router_logits o (N, E):(1, N) -> topk_idx o (N, K):(K, 1), topk_weights o (N, K):(K, 1)`
+1. topk
 
-    computes the indices of top `K` experts `E` per token `N`; 
-    based of an activation over `router_logits` (`sigmoid`, `softmax`);
-    optionally sums (if given) `e_correction_bias` before `argmax`.
+> Computes the indices of top `K` experts `E` per token `N`; based of an activation over `router_logits` (`sigmoid`, `softmax`);
 
-    topk operation itself is recursive.
+`topk : router_logits o (N, E):(1, N)` $\rightarrow$ `(topk_idx o (N, K):(1, K), topk_weights o (N, K):(1, K))`
 
-    * each thread can hold at least 2 elements (max) -> $\frac{n^2}{2} \times \cdots \times \frac{(n-k-1)^2}{2}$ `for-each topk`
-    * quicksort-esq
+2. gather and permute
 
-    CTA 256 $\rightarrow$ `(8, 4, 8)`
+Note: This is an optimization choice, after considering trade-offs. Mainly, the extra space required by this kernel is offset by needing ~67% of that additional space for the down projection phase anyway. It is our opinion that scattered loads pose an avoidable bottleneck (even with optimized prefetching).
 
----
+We will supply experiments to back our claims (but it's physics at the end of the day).
 
-2. [gather/permute]
-4. ff1, megatron trick, act, [quantize], [scatter]
-5. ff2, reduce
-
-optional: topk_idx2crd/f2
-
-arch
-1. sm89: bf16
-2. sm120: bf16, fp8, nvf4
