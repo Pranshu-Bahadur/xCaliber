@@ -58,7 +58,7 @@ __global__ void topk(
                     rW  += rA[j];
                 }
                 else {
-                    rA[j] = -rA[j] * 1.4426950408889634f;
+                    rA[j] = fmaf(-(rA[j]), 1.4426950408889634f, 0.0f);
                     asm volatile(
                         "ex2.approx.ftz.f32 %0, %1;\n\t"
                         : "=f"(rA[j])
