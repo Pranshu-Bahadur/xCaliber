@@ -123,7 +123,7 @@ __global__ void topk_kernel(
             local_topk[i].x = __float_as_uint(fmaf(__uint_as_float(local_topk[i].x), rW, 0.0f));
         }
     }
-    #pragma unroll 8
+    /*
     for (int i = 0; i < K; i++) {
         for (int j = 0; j < i; j++) {
             if (local_topk[j].x > local_topk[i].x) {
@@ -133,6 +133,7 @@ __global__ void topk_kernel(
             }
         }
     }
+    */
     local_minmax[1] = local_minmax[0];
     int pivot = K;
     for (int i = K-1; i >= 0; i--) {
