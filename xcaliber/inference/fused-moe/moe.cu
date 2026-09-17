@@ -16,11 +16,11 @@ namespace cg = cooperative_groups;
 
 */
 template <typename T, bool softmax>
-__global__ void topk(
+__global__ void topk_kernel(
     const T* router_logits,
     int* topk_idx,
     __nv_bfloat16* topk_weights,
-    const float* e_correction_bias = nullptr,
+    //const float* e_correction_bias = nullptr, //@TODO
     const int K,
     const int N,
     const int E
@@ -49,7 +49,7 @@ __global__ void topk(
             #pragma unroll 8
             for (int j = i-8; j < i; j++) {
                 if (softmax) {
-                    rA[j] = rA[j] * 1.4426950408889634f;
+                    rA[j] = fmaf(-(rA[j]), 1.4426950408889634f, 0.0f);
                     asm volatile(
                         "ex2.approx.ftz.f32 %0, %1;\n\t"
                         : "=f"(rA[j])
@@ -100,7 +100,8 @@ __global__ void topk(
         }
         if (i < T1) {
             asm volatile(
-                "ld.global.cs.acquire.gpu.v4.b32.L2::256B %0, [%1];\n\t"
+                "ld.global.cg.v4.b32.L2::256B.L1::no_allocate %0, [%1];\n\t"
+                "ld.global.cg.v4.b32.L2::256B.L1::no_allocate %0 + 4, [%1 + 4];\n\t"
                 : "=r"((uint32_t)(rA + i))
                 : "l"((uint64_t)__cvta_generic_to_global(router_logits + offset + ((uint64_t)i << 5)))
                 )
@@ -152,5 +153,42 @@ __global__ void topk(
     }
     if ((!((tid & 31) >> 4)) && ((tid & 15) < K)) {
         topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __float2bfloat16(__uint_as_float(global_topk[(tid & 15)].x));
+    }
+}
+
+
+void topk(
+    at::Tensor router_logits,
+    at::Tensor topk_idx,
+    at::Tensor topk_weights,
+    const int K,
+    bool softmax
+) {
+    const int N = router_logits.size(0);
+    const int E = router_logits.size(1);
+
+
+    dim3 block(8, 4, 8);
+    dim3 grid((N + 7) / 8));
+
+    if (softmax) {
+        topk_kernel<float, True><<<grid, block, 0, 0>>>(
+            router_logits,
+            topk_idx,
+            topk_weights,
+            K,
+            N,
+            E
+        )
+    }
+    else {
+        topk_kernel<float, False><<<grid, block, 0, 0>>>(
+            router_logits,
+            topk_idx,
+            topk_weights,
+            K,
+            N,
+            E
+        )
     }
 }
