@@ -1,5 +1,15 @@
-# xCalibur: SuperSonicMoE
-aim: reach sol perf
+xCalibur: SuperSonicMoE
+
+> Background story: The SuperSonicMoE operator aims to be the spiritual successor to SonicMoE. However, the operator strives to be a successor in name only, as (much like a problem child) it tends to disagree with its ancestor at nearly every design decision (mostly). Jokes aside, xCalibur has nothing but the utmost respect for SonicMoE. Our only hope is that we live up to the name.
+
+## Problem statement:
+
+    Mixture of experts (MoE), make up ~90% of LLMs (this is before skynet, ofc., 2026). However, relative to other layers that make up our baby terminators, MoE has had little love by the GPU kernel ninjas. Primarily because it's hella boring or maybe it's because the kages don't care as much. Eitherway, it's a critical bottleneck, perfect for xCalibur to give it a go.
+
+    Ok, now that we've set the stage, it's time for us to lock-in.
+
+## Formulation:
+
 ---
 > The MoE operator can be defined through the following sub-operators.
 
@@ -19,8 +29,6 @@ aim: reach sol perf
 ---
 
 2. [gather/permute]
-3. topk -> 1hot
-4. [quantize]
 4. ff1, megatron trick, act, [quantize], [scatter]
 5. ff2, reduce
 
