@@ -101,8 +101,8 @@ __global__ void topk_kernel(
         }
         if (i < T1) {
             asm volatile(
-                "ld.global.cg.L2::256B.v4.f32 {%0, %1, %2, %3}, [%8];\n\t"
-                "ld.global.cg.L2::256B.v4.f32 {%4, %5, %6, %7}, [%8 + 16];\n\t"
+                "ld.global.cg.L2::128B.v4.f32 {%0, %1, %2, %3}, [%8];\n\t"
+                "ld.global.cg.L2::128B.v4.f32 {%4, %5, %6, %7}, [%8 + 16];\n\t"
                 : "=f"(rA[i]), "=f"(rA[i + 1]), "=f"(rA[i + 2]), 
                   "=f"(rA[i + 3]), "=f"(rA[i + 4]),
                   "=f"(rA[i + 5]), "=f"(rA[i + 6]), "=f"(rA[i + 7])
