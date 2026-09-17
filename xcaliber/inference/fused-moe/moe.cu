@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
 #include <cstdint>
@@ -31,12 +32,12 @@ __global__ void topk_kernel(
     const int64_t tid = cta.thread_rank();
     const dim3 tidC = cta.thread_index();
     const uint64_t e_offset = (uint64_t)((((tidC.y << 3) + tidC.x) << 3));
-    const uint64_t offset = (uint64_t)(((blockIdx.x << 3) + tidC.z) * E) + e_offset);
+    const uint64_t offset = (uint64_t)((((blockIdx.x << 3) + tidC.z) * E) + e_offset);
     float rA[64];
     float rW  = 0.0f;
     uint2 tmp;
-    uint2 local_topk[K];
-    uint2 global_topk[K];
+    uint2 local_topk[32];
+    uint2 global_topk[32];
     uint2 local_minmax[2] = {
             make_uint2(0u, 0u),    
             make_uint2(0xffff'ffffu, 0u)
@@ -44,12 +45,12 @@ __global__ void topk_kernel(
     if ((uint64_t)(((blockIdx.x << 3) + tidC.z)) > N) {
         return;
     }
-    for (int i = 0; i < T1 + 8; i += 8)) {
+    for (int i = 0; i < T1 + 8; i += 8) {
         if (i) {   
             #pragma unroll 8
             for (int j = i-8; j < i; j++) {
                 if (softmax) {
-                    rA[j] = fmaf(-(rA[j]), 1.4426950408889634f, 0.0f);
+                    rA[j] = fmaf(rA[j], 1.4426950408889634f, 0.0f);
                     asm volatile(
                         "ex2.approx.ftz.f32 %0, %1;\n\t"
                         : "=f"(rA[j])
@@ -100,20 +101,21 @@ __global__ void topk_kernel(
         }
         if (i < T1) {
             asm volatile(
-                "ld.global.cg.v4.b32.L2::256B.L1::no_allocate %0, [%1];\n\t"
-                "ld.global.cg.v4.b32.L2::256B.L1::no_allocate %0 + 4, [%1 + 4];\n\t"
-                : "=r"((uint32_t)(rA + i))
+                "ld.global.cg.L2::256B.v4.f32 {%0, %1, %2, %3}, [%8];\n\t"
+                "ld.global.cg.L2::256B.v4.f32 {%4, %5, %6, %7}, [%8 + 16];\n\t"
+                : "=f"(rA[i]), "=f"(rA[i + 1]), "=f"(rA[i + 2]), 
+                  "=f"(rA[i + 3]), "=f"(rA[i + 4]),
+                  "=f"(rA[i + 5]), "=f"(rA[i + 6]), "=f"(rA[i + 7])
                 : "l"((uint64_t)__cvta_generic_to_global(router_logits + offset + ((uint64_t)i << 5)))
-                )
             );
         }
     }
     if (softmax) {
         #pragma unroll 5
         for (int i = 16; i > 0; i >>= 1) {
-            rW = rW + __shfl_xor_sync(0xffff'ffffu, rW, i)
+            rW = rW + __shfl_xor_sync(0xffff'ffffu, rW, i);
         }
-        #pragma unroll K
+        #pragma unroll 8
         for (int i = 0; i < K; i++) {
             asm volatile("rcp.approx.ftz.f32 %0, %1;\n\t"
                 : "=f"(rW) 
@@ -122,7 +124,7 @@ __global__ void topk_kernel(
             local_topk[i].x = __float_as_uint(fmaf(__uint_as_float(local_topk[i].x), rW, 0.0f));
         }
     }
-    #pragma unroll K
+    #pragma unroll 8
     for (int i = 0; i < K; i++) {
         for (int j = 0; j < i; j++) {
             if (local_topk[j].x > local_topk[i].x) {
@@ -166,29 +168,26 @@ void topk(
 ) {
     const int N = router_logits.size(0);
     const int E = router_logits.size(1);
-
-
     dim3 block(8, 4, 8);
-    dim3 grid((N + 7) / 8));
-
+    dim3 grid((int)(N + 7) / 8);
     if (softmax) {
-        topk_kernel<float, True><<<grid, block, 0, 0>>>(
-            router_logits,
-            topk_idx,
-            topk_weights,
+        topk_kernel<float, true><<<grid, block, 0, 0>>>(
+            router_logits.data_ptr<float>(),
+            topk_idx.data_ptr<int>(),
+            reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
             K,
             N,
             E
-        )
+        );
     }
     else {
-        topk_kernel<float, False><<<grid, block, 0, 0>>>(
-            router_logits,
-            topk_idx,
-            topk_weights,
+        topk_kernel<float, false><<<grid, block, 0, 0>>>(
+            router_logits.data_ptr<float>(),
+            topk_idx.data_ptr<int>(),
+            reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
             K,
             N,
             E
-        )
+        );
     }
 }
