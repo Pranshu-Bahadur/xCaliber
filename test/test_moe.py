@@ -1,5 +1,5 @@
 import torch
-import xcalibur
+import xcaliber
 
 
 def bench(fn, repeat=100):
