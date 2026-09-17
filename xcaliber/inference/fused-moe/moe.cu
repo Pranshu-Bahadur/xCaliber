@@ -64,7 +64,7 @@ __global__ void topk(
                         : "=f"(rA[j])
                         : "f"(rA[j])
                     );
-                    rA[j] + 1.0f;
+                    rA[j] += 1.0f;
                     asm volatile("rcp.approx.ftz.f32 %0, %1;"
                         : "=f"(rA[j]) 
                         : "f"(rA[j])
