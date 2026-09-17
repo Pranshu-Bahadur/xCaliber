@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent
 
 sources = [
     ROOT / "inference" / "fused-moe" / "bindings.cpp",
-    ROOT / "inference" / "fused-moe" / "moe.cu"
+    ROOT / "inference" / "fused-moe" / "topk.cu"
 ]
 
 setup(
