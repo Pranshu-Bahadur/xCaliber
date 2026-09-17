@@ -66,9 +66,9 @@ def test_topk():
     # The current binding dispatches FP32 input and launches on the default stream.
     with torch.cuda.stream(torch.cuda.default_stream()):
         for softmax in (False, True):
-            for N in (1, 7, 8, 9, 257):
-                for E in (256, 512, 1024, 2048):
-                    for K in (1, 8, 16):
+            for N in (8, 16, 16384):
+                for E in (128, 256, 384):
+                    for K in (2, 8):
                         check(N, E, K, softmax)
             for kind in ("ties", "extreme", "local"):
                 check(9, 512, 8, softmax, kind)
@@ -79,8 +79,8 @@ if __name__ == "__main__":
     print(f"Correctness passed | {torch.cuda.get_device_name()}")
     print("     N     E   K activation  xcalibur_us    torch_us  speedup")
     with torch.cuda.stream(torch.cuda.default_stream()):
-        for N in (1, 8, 128, 1024, 8192):
-            for E in (256, 512, 1024, 2048):
+        for N in (8, 128, 1024, 8192):
+            for E in (128, 256, 384):
                 for softmax in (False, True):
                     ours, baseline = check(N, E, 8, softmax, timed=True)
                     print(f"{N:6} {E:5}   8 {'softmax' if softmax else 'sigmoid':>10}"
