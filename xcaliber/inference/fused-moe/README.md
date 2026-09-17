@@ -19,5 +19,9 @@ Ok, now that we've set the stage, it's time for us to lock-in.
 
 `topk : router_logits o (N, E):(1, N)` $\rightarrow$ `(topk_idx o (N, K):(1, K), topk_weights o (N, K):(1, K))`
 
+2. gather
+
 @TODO: add 1hot encoding (SonicMoE is right, due to L2 cache reuse) //still evaluating
+
+this needs to be done in a way such that decoding is easy (explore cute)
 
