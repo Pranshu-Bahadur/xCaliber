@@ -22,3 +22,5 @@ gpumode/
 **/dist/
 **/*.egg-info/
 **/*.so
+.deps/
+/.deps/CuTe/

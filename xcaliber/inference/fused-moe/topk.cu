@@ -32,11 +32,11 @@ __global__ void topk_kernel(
     const dim3 tidC = cta.thread_index();
     const uint64_t e_offset = (uint64_t)((((tidC.y << 3) + tidC.x) << 3));
     const uint64_t offset = (uint64_t)((((blockIdx.x << 3) + tidC.z) * E) + e_offset);
-    float rA[64];
+    float rA[32];
     float rW  = 0.0f;
     uint2 tmp;
-    uint2 local_topk[32];
-    uint2 global_topk[32];
+    uint2 local_topk[16];
+    uint2 global_topk[16];
     uint2 local_minmax[2] = {
             make_uint2(0u, 0u),    
             make_uint2(0xffff'ffffu, 0u)
@@ -123,7 +123,6 @@ __global__ void topk_kernel(
             local_topk[i].x = __float_as_uint(fmaf(__uint_as_float(local_topk[i].x), rW, 0.0f));
         }
     }
-    #pragma unroll 8
     for (int i = 0; i < K; i++) {
         for (int j = 0; j < i; j++) {
             if (local_topk[j].x > local_topk[i].x) {
@@ -157,7 +156,6 @@ __global__ void topk_kernel(
         topk_weights[(uint64_t)(((blockIdx.x << 3) + tidC.z) * K) + (uint64_t)((tid & 15))] = __float2bfloat16(__uint_as_float(global_topk[(tid & 15)].x));
     }
 }
-
 
 void topk(
     at::Tensor router_logits,
