@@ -47,9 +47,9 @@ def check(N, E, K, softmax):
     # Compare selected scores, allowing either order and any valid tied indices.
     selected = scores.gather(1, out_idx.long())
     torch.testing.assert_close(selected.sort(dim=-1).values, ref_values.sort(dim=-1).values,
-                               rtol=0, atol=0, msg=label)
+                               rtol=0, atol=0, msg=lambda msg: f"{label}\n{msg}")
     torch.testing.assert_close(out_weights.float(), selected.bfloat16().float(),
-                               rtol=8e-3, atol=1e-6, msg=label)
+                               rtol=8e-3, atol=1e-6, msg=lambda msg: f"{label}\n{msg}")
     return bench(run), bench(reference)
 
 

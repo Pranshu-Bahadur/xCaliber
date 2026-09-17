@@ -143,7 +143,8 @@ __global__ void topk_kernel(
         for (int j = 16; j > 0; j >>= 1) {
             tmp.x = __shfl_xor_sync(0xffff'ffffu, local_minmax[0].x, j);
             tmp.y = __shfl_xor_sync(0xffff'ffffu, local_minmax[0].y, j);
-            if (local_minmax[0].x < tmp.x) {
+            if ((local_minmax[0].x < tmp.x) ||
+                ((local_minmax[0].x == tmp.x) && (local_minmax[0].y > tmp.y))) {
                 local_minmax[0] = tmp;
             }
         }
