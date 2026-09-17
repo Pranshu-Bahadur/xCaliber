@@ -162,7 +162,7 @@ void topk(
     at::Tensor router_logits,
     at::Tensor topk_idx,
     at::Tensor topk_weights,
-    const int K,
+    const int64_t K,
     bool softmax
 ) {
     const int N = router_logits.size(0);
@@ -174,7 +174,7 @@ void topk(
             router_logits.data_ptr<float>(),
             topk_idx.data_ptr<int>(),
             reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
-            K,
+            static_cast<int>(K),
             N,
             E
         );
@@ -184,7 +184,7 @@ void topk(
             router_logits.data_ptr<float>(),
             topk_idx.data_ptr<int>(),
             reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
-            K,
+            static_cast<int>(K),
             N,
             E
         );

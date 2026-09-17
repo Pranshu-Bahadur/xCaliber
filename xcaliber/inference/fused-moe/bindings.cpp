@@ -11,7 +11,7 @@ void topk(
     at::Tensor router_logits,
     at::Tensor topk_idx,
     at::Tensor topk_weights,
-    const int K,
+    const int64_t K,
     bool softmax
 );
 
