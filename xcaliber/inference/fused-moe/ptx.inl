@@ -104,7 +104,7 @@ __device__ void rcp_bf16x2(
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
-            
+
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
             "and.b32 w, w, 0x00007fff;\n\t"
@@ -161,7 +161,7 @@ __device__ void add_bf16x2x1(
             "add.f32 x, w, x;\n\t"
             "add.f32 x, x, %2;\n\t"
             "cvt.rn.bf16.f32 a, x;\n\t"
-            "mov.b32 %0, {a, _}"
+            "mov.b32 %0, {a, _};\n\t"
             : "=r"(y)
             : "r"(x), "f"(y)
         );

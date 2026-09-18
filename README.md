@@ -1,6 +1,3 @@
 # xCalibur
 
-aim: learn cute algebra, have fun.
-
-purpose (for now):
-just practise kernels to train llms, run inference, and/or compress (quantization, sparsity, etc), prolly.
+The purpose of this repo is to assist in solving problems real problems like, epilepsy.
