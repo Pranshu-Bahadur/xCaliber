@@ -5,38 +5,29 @@ template<bool SM90P>
 __device__ void softmax_bf16x2(
     uint32_t x
 ){ 
-    if (SM90P) {
-        asm volatile( //@TODO add mul
-            "ex2.approx.ftz.bf16x2 %0, %1;\n\t"
-            : "=r"(x)
-            : "r"(x)
-        );
-    } //SM80, SM89
-    else { 
-        float y = 1.4426950408889634f;
-        asm volatile(
-            ".reg .b32 w, x;\n\t"
-            ".reg .b16 a, b;\n\t"
-            "mov.b16 {a, b}, %1;\n\t"
-            "mov.b32 w, {a, _};\n\t"
-            "and.b32 %1, w, 0x00001000;\n\t"
-            "and.b32 w, w, 0x00007fff;\n\t"
-            "shl.b32 %1, %1, 16;\n\t"
-            "or.b32  w, w, %1;\n\t"
-            "mov.b32 x, {b, _};\n\t"
-            "and.b32 %1, x, 0x00001000;\n\t"
-            "and.b32 x, x, 0x00007fff;\n\t"
-            "shl.b32 %1, %1, 16;\n\t"
-            "or.b32  x, x, %1;\n\t"
-            "mul.f32 w, w, %2;\n\t"
-            "mul.f32 x, x, %2;\n\t"
-            "ex2.approx.ftz.f32 w, w;\n\t"
-            "ex2.approx.ftz.f32 x, x;\n\t"
-            "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
-            : "=r"(x)
-            : "r"(x), "f"(y)
-        );
-    }
+    float y = 1.4426950408889634f;
+    asm volatile(
+        ".reg .b32 w, x;\n\t"
+        ".reg .b16 a, b;\n\t"
+        "mov.b16 {a, b}, %1;\n\t"
+        "mov.b32 w, {a, _};\n\t"
+        "and.b32 %1, w, 0x00001000;\n\t"
+        "and.b32 w, w, 0x00007fff;\n\t"
+        "shl.b32 %1, %1, 16;\n\t"
+        "or.b32  w, w, %1;\n\t"
+        "mov.b32 x, {b, _};\n\t"
+        "and.b32 %1, x, 0x00001000;\n\t"
+        "and.b32 x, x, 0x00007fff;\n\t"
+        "shl.b32 %1, %1, 16;\n\t"
+        "or.b32  x, x, %1;\n\t"
+        "mul.f32 w, w, %2;\n\t"
+        "mul.f32 x, x, %2;\n\t"
+        "ex2.approx.ftz.f32 w, w;\n\t"
+        "ex2.approx.ftz.f32 x, x;\n\t"
+        "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
+        : "=r"(x)
+        : "r"(x), "f"(y)
+    );
 }
 
 template<bool SM90P>
@@ -92,19 +83,16 @@ __device__ void rcp_bf16x2(
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
-
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
             "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
-
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
             "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
-
             "rcp.approx.ftz.f32 w, w;\n\t"
             "rcp.approx.ftz.f32 x, x;\n\t"
             "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
