@@ -70,5 +70,29 @@ __global__ void topk_kernel(
                 softmax_mul(rmem[16 + i], smd);
             }
         }
+        int pivot = 0;
+        uint32_t key = rmem[16];
+        uint32_t global_topk = 0u;
+        for (int i = 0; i < K; i++) {
+            uint32_t tmp = __reduce_max_sync(0xffff'ffffu, key);
+            if (lane == i) {
+                global_topk = tmp;
+            }
+            if (key == tmp) {
+                ++pivot;
+                key = (pivot < K) ? rmem[16 + pivot] : 0u;
+            }
+        }
+        if ((threadIdx.x + (threadIdx.y << 3)) < (K << 1)) {
+            const uint64_t offset = (((uint64_t(blockIdx.x) << 3) + threadIdx.z) * K) + lane;
+            global_topk = __shfl_xor_sync(0xffff'ffffu, global_topk, 16);
+            if ((threadIdx.x + (threadIdx.y << 3)) >> 4) {
+                topk_idx[offset] = int(0xffffu - (global_topk & 0xffffu));
+            }
+            else {
+                topk_weights[offset] = __nv_bfloat16((uint16_t)(global_topk & 0xffff'0000u));
+            }
+            
+        }
     }
 }
