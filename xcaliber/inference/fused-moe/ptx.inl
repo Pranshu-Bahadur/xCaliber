@@ -21,11 +21,13 @@ __device__ void softmax_bf16x2( //@TODO fix
             
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
+            "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
 
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
+            "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
 
@@ -62,21 +64,25 @@ __device__ void add_bf16x2(
             
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
+            "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
 
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
+            "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
             
             "mov.b32 y, {c, _};\n\t"
             "and.b32 %1, y, 0x00001000;\n\t"
+            "and.b32 y, y, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  y, y, %1;\n\t"
             
             "mov.b32 z, {d, _};\n\t"
             "and.b32 %1, z, 0x00001000;\n\t"
+            "and.b32 z, z, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  z, z, %1;\n\t"
 
@@ -101,11 +107,13 @@ __device__ void rcp_bf16x2(
             
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
+            "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
 
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
+            "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
 
@@ -140,11 +148,13 @@ __device__ void add_bf16x2x1(
             
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
+            "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
 
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
+            "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
 
