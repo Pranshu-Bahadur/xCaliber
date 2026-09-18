@@ -1,4 +1,14 @@
-//imports
+#include <ATen/ATen.h>
+#include <cuda_runtime.h>
+#include <cuda_bf16.h>
+#include <cstdint>
+#include <cmath>
+#include <tuple>
+#include <cfloat>
+#include <cooperative_groups.h>
+#include <type_traits>
+
+
 template <bool softmax>
 __global__ void topk_kernel(
     const __nv_bfloat16* router_logits,
