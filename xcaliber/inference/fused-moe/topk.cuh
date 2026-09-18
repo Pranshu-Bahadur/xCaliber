@@ -57,5 +57,18 @@ __global__ void topk_kernel(
                 &rmem[i << 2]
             );
         }
+        if (softmax) {
+            smd = 0xffff'0000u & smd;
+            #pragma unroll 5
+            for (int i = 16; i > 0; i >>= 1) {
+                add_bf16x2(smd, __shfl_xor_sync(0xffff'ffffu, smd, i));
+            }
+            rcp_bf16x2(smd);
+            smd = 0xffff'0000u & smd;
+            #pragma unroll 8
+            for (int i = 0; i < K; i++) {
+                softmax_mul(rmem[16 + i], smd);
+            }
+        }
     }
 }

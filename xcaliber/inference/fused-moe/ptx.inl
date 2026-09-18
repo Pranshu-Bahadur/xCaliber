@@ -2,7 +2,6 @@
 #define f322b(x) __float_as_uint(x)
 #define u162bf16(x) __ushort_as_bfloat16(x)
 
-template<bool negate>
 __device__ uint32_t softmax_bf16x2(
     uint32_t x
 ){ 
@@ -142,6 +141,35 @@ __device__ void add_bf16x2x1(
         );
     }
 }
+
+__device__ uint32_t softmax_mul(
+    uint32_t x, uint32_t y
+){ 
+    uint32_t idx = x & 0x0000'ffffu;
+    asm volatile(
+        ".reg .b32 w, x;\n\t"
+        ".reg .b16 a, b;\n\t"
+        "mov.b16 {a, _}, %1;\n\t"
+        "mov.b16 {b, _}, %2;\n\t"
+        "mov.b32 w, {a, _};\n\t"
+        "and.b32 %1, w, 0x00001000;\n\t"
+        "and.b32 w, w, 0x00007fff;\n\t"
+        "shl.b32 %1, %1, 16;\n\t"
+        "or.b32  w, w, %1;\n\t"
+        "mov.b32 x, {b, _};\n\t"
+        "and.b32 %1, x, 0x00001000;\n\t"
+        "and.b32 x, x, 0x00007fff;\n\t"
+        "shl.b32 %1, %1, 16;\n\t"
+        "or.b32  x, x, %1;\n\t"
+        "mul.f32 w, w, x;\n\t"
+        "cvt.rn.bf16.f32 %0, w;\n\t"
+        : "=r"(x)
+        : "r"(x), "r"(z)
+    );
+    x = (x & 0xffff'0000u) | idx;
+    return x;
+}
+
 
 __device__ void ldcg_b32v4(
     const uint64_t* src,
