@@ -146,7 +146,7 @@ __device__ void ldcg_b32v4(
     uint32_t* dst
 ){
     asm volatile(
-            "ld.global.cg.L2::128B.v4.b32 {%0, %1, %2, %3}, [%8];\n\t"
+            "ld.global.cg.L2::128B.v4.b32 {%0, %1, %2, %3}, [%4];\n\t"
             : "=r"(dst[i]), "=r"(dst[i + 1]), "=r"(dst[i + 2]), "=r"(dst[i + 3])
             : "l"((uint64_t)__cvta_generic_to_global(src))
         );
