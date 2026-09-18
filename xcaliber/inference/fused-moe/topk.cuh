@@ -26,7 +26,7 @@ __global__ void topk_kernel(
         int KP = (int)((K + 1)/2);
         if (i) { // mutable ^
             for (int j = 0; j < (i << 2) && (j << 1) < KP; j++) {
-                if (j > ((i-1) << 2)) {       
+                if (j >= ((i-1) << 2)) {       
                     if (softmax) {
                         rmem[j] = softmax_bf16x2(rmem[j]);
                         if (!j) rmem[31] = 0u;
@@ -34,13 +34,16 @@ __global__ void topk_kernel(
                     }
                     if (!softmax) {
                         rmem[j] = softmax_bf16x2(__hneg2(rmem[j]));
-                        rmem[j] = add_bf16x2(rmem[j], make_uint2(0x0000'0001u, 0x0000'0001u));
+                        rmem[j] = add_bf16x2(rmem[j], make_bfloat162(
+                            u162bf16(0x1u),
+                            u162bf16(0x1u))
+                        );
                         rmem[j] = rcp_bf16x2(rmem[j]);
                     }
                 }
                 if ((j << 1) < KP) {
-                    uint32_t m1 = __hgt2_mask(rmem[30], rmem[j]);
-                    uint32_t m2 = __hgt2_mask(rmem[29], rmem[j]);
+                    uint32_t m1 = __hlt2_mask(rmem[30], rmem[j]);
+                    uint32_t m2 = __hlt2_mask(rmem[29], rmem[j]);
                     if (m1==0xffff'ffffu && m1==m2) {
                         int m3 = __hgt(rmem[j].x, rmem[j].y);
                         rmem[30].x = (m3)? rmem[j].y : rmem[j].x;
@@ -50,7 +53,7 @@ __global__ void topk_kernel(
                         ltopk_idx[j << 1] = (uint16_t)(((m3)? (j << 1) + 1 : (j << 1)) + (threadIdx.y << 2) + (i << 6));
                         ltopk_idx[(j << 1) + 1] = (uint16_t)(((m3)? (j << 1) : (j << 1) + 1) + (threadIdx.y << 2) + (i << 6));
                     }
-                    if (m1==0xffff'00000u) {
+                    if (m1==0xffff'0000u) {
                         rmem[30].x = rmem[j].x;
                         rmem[29].y = rmem[j].x;
                         ltopk_idx[j << 1] = (uint16_t)((j << 1) + (threadIdx.y << 2) + (i << 6));;
@@ -63,8 +66,8 @@ __global__ void topk_kernel(
                     if (m2==0x0000'ffffu) {
                         rmem[30].x = rmem[j].y;
                         rmem[29].y = rmem[j].y;
-                        ltopk_idx[j << 1] = (uint16_t)(((j << 1)+1) + (threadIdx.y << 2) + (i << 6));;
-                        if (m2==0xffff'0000u) {
+                        ltopk_idx[(j << 1) + 1] = (uint16_t)(((j << 1)+1) + (threadIdx.y << 2) + (i << 6));;
+                        if (m1==0xffff'0000u) {
                             rmem[30].y = rmem[j].x;
                             rmem[29].x = rmem[j].x;
                             ltopk_idx[(j << 1)] = (uint16_t)(((j << 1)) + (threadIdx.y << 2) + (i << 6));
