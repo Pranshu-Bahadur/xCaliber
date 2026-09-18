@@ -3,8 +3,8 @@
 #define u162bf16(x) __ushort_as_bfloat16(x)
 
 template<bool negate>
-__device__ void softmax_bf16x2(
-    __nv_bfloat162 x
+__device__ uint32_t softmax_bf16x2(
+    uint32_t x
 ){ 
     float y = 1.4426950408889634f;
     asm volatile(
@@ -29,11 +29,12 @@ __device__ void softmax_bf16x2(
         : "=r"(x)
         : "r"(x), "f"(y)
     );
+    return x;
 }
 
 template<bool SM90P>
 __device__ void add_bf16x2(
-    __nv_bfloat162 x, __nv_bfloat162 y
+    uint32_t x, uint32_t y
 ){
     if (SM90P) {
         asm volatile(
@@ -78,7 +79,7 @@ __device__ void add_bf16x2(
 }
 
 __device__ void rcp_bf16x2(
-    __nv_bfloat162 x
+    uint32_t x
 ){
     asm volatile(
             ".reg .b32 w, x;\n\t"
@@ -104,7 +105,7 @@ __device__ void rcp_bf16x2(
 
 template<bool SM90P>
 __device__ void add_bf16x2x1(
-    __nv_bfloat162 x, __nv_bfloat162 y
+    uint32_t x, uint32_t y
 ){
     if (SM90P) {
         asm volatile(

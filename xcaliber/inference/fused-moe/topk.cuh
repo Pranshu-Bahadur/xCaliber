@@ -9,85 +9,53 @@ __global__ void topk_kernel(
     const int N,
     const int E
 ){
-    __nv_bfloat162 rmem[32];
-    ushort ltopk_idx[16];
-    if ((uint64_t)(((blockIdx.x << 3) + threadIdx.x)) > N) {
+    uint32_t smd = 0u;
+    uint32_t rmem[32];
+    if ((uint64_t)(((blockIdx.x << 3) + threadIdx.z)) > N) {
         return;
     }
-    rmem[30] = make_bfloat162(
-                u162bf16(0u),
-                u162bf16(0u)
-            );
-    rmem[29] = rmem[30];
-    rmem[28] = rmem[30];
-    rmem[27] = rmem[30];
-    
-    for (int i = 0; i <= (E >> 10); i++) { //the 10 needs to be mutable
-        int KP = (int)((K + 1)/2);
-        if (i) { // mutable ^
-            for (int j = 0; j < (i << 2) && (j << 1) < KP; j++) {
-                if (j >= ((i-1) << 2)) {       
-                    if (softmax) {
+    #pragma unroll 8
+    for (int k = 0; k < K; k++) {
+        rmem[16 + k] = 0u;
+    }
+    for (int i = 0; i <= (E >> 8); i++) {
+        if (i) {
+            for (int j = ((i-1) << 2); j < (i << 2); j++) {
+                if (softmax) {
                         rmem[j] = softmax_bf16x2(rmem[j]);
-                        if (!j) rmem[31] = 0u;
-                        rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
-                    }
-                    if (!softmax) {
-                        rmem[j] = softmax_bf16x2(__hneg2(rmem[j]));
-                        rmem[j] = add_bf16x2(rmem[j], make_bfloat162(
-                            u162bf16(0x1u),
-                            u162bf16(0x1u))
-                        );
-                        rmem[j] = rcp_bf16x2(rmem[j]);
-                    }
+                        if (!j) smd = 0u;
+                        add_bf16x2x1(rmem[j], smd);
                 }
-                if ((j << 1) < KP) {
-                    uint32_t m1 = __hlt2_mask(rmem[30], rmem[j]);
-                    uint32_t m2 = __hlt2_mask(rmem[29], rmem[j]);
-                    if (m1==0xffff'ffffu && m1==m2) {
-                        int m3 = __hgt(rmem[j].x, rmem[j].y);
-                        rmem[30].x = (m3)? rmem[j].y : rmem[j].x;
-                        rmem[30].y = (m3)? rmem[j].x : rmem[j].y;
-                        rmem[29].x = rmem[30].y;
-                        rmem[29].y = rmem[30].x;
-                        ltopk_idx[j << 1] = (uint16_t)(((m3)? (j << 1) + 1 : (j << 1)) + (threadIdx.y << 2) + (i << 6));
-                        ltopk_idx[(j << 1) + 1] = (uint16_t)(((m3)? (j << 1) : (j << 1) + 1) + (threadIdx.y << 2) + (i << 6));
-                    }
-                    if (m1==0xffff'0000u) {
-                        rmem[30].x = rmem[j].x;
-                        rmem[29].y = rmem[j].x;
-                        ltopk_idx[j << 1] = (uint16_t)((j << 1) + (threadIdx.y << 2) + (i << 6));;
-                        if (m2==0x0000'ffffu) {
-                            rmem[30].y = rmem[j].y;
-                            rmem[29].x = rmem[j].y;
-                            ltopk_idx[(j << 1) + 1] = (uint16_t)(((j << 1) + 1) + (threadIdx.y << 2) + (i << 6));
-                        }
-                    }
-                    if (m2==0x0000'ffffu) {
-                        rmem[30].x = rmem[j].y;
-                        rmem[29].y = rmem[j].y;
-                        ltopk_idx[(j << 1) + 1] = (uint16_t)(((j << 1)+1) + (threadIdx.y << 2) + (i << 6));;
-                        if (m1==0xffff'0000u) {
-                            rmem[30].y = rmem[j].x;
-                            rmem[29].x = rmem[j].x;
-                            ltopk_idx[(j << 1)] = (uint16_t)(((j << 1)) + (threadIdx.y << 2) + (i << 6));
-                        }
+                if (!softmax) {
+                        rmem[j] = softmax_bf16x2(rmem[j] ^ 0x8000'8000u);
+                        add_bf16x2(rmem[j], 0x0001'0001u);
+                        rcp_bf16x2(rmem[j]);
+                }
+                uint16_t e_offset = (uint16_t)((0xffffu - ((threadIdx.x + (threadIdx.y << 3)) + ((i - 1) << 8))) + ((j & 3) << 1));
+                rmem[j ^ 4] =  (rmem[j] << 16) | e_offset;
+                rmem[j] =  (rmem[j] & 0xffff'0000u) | e_offset - 1u;
+                #pragma unroll 2
+                for (int candidate = 0; candidate < 2; candidate++) {
+                    uint32_t key = candidate ? rmem[j] : rmem[j ^ 4];
+                    for (int k = 0; k < min(K, (j << 1) + candidate + 1); k++) {
+                        uint32_t tmp = rmem[16 + k];
+                        rmem[16 + k] = max(tmp, key);
+                        key = min(tmp, key);
                     }
                 }
             }
         }
-        if (i < (E >> 10)) {
+        if (i < (E >> 8)) {
             ldcg_b32v4(
                 (uint64_t)__cvta_generic_to_global(
                     (uint64_t)(
                         router_logits
-                        + (((blockIdx.x << 3) + (threadIdx.x)) * E)
-                        + (threadIdx.y << 2) + (i << 6)
+                        + (((blockIdx.x << 3) + (threadIdx.z)) * E)
+                        + (threadIdx.x + (threadIdx.y << 3)) + (i << 8)
                     )
                 ),
-                (uint32_t)(&rmem[i << 2])
+                &rmem[i << 2]
             );
         }
-        
     }
 }
