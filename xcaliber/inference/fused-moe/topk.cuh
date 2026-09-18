@@ -9,9 +9,9 @@ __global__ void topk_kernel(
     const int E
 ){
     uint32_t rmem[32];
-    for (int i = 0; i < (E >> 10); i++) {
+    for (int i = 0; i < (E >> 10); i++) { //the 10 needs to be mutable
         if (i) {
-            for (int j = i-4; j < 4 && i < K; j++) {
+            for (int j = i-4; j < 4 && i < K; j++) { //the 4 needs to be mutable
                 if (softmax) {
                     rmem[j] = softmax_bf16x2(rmem[j]);
                     rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
