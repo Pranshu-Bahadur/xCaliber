@@ -8,17 +8,15 @@ __global__ void topk_kernel(
     const int N,
     const int E
 ){
-
     uint32_t rmem[32];
-
-    for (int i = 0; i < (E >> 9); i++) {
+    for (int i = 0; i < (E >> 10); i++) {
         if (i) {
             for (int j = 0; j < 8; i++) {
                 if (softmax) {
-                    rmem[j] = __float_as_uint();
+                    rmem[j] = softmax_bf16x2(rmem[j]);
+                    rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
                 }
             }
         }
-
     }
 }

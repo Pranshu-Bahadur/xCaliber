@@ -1,17 +1,19 @@
 
 #define f322b(x) __float_as_uint(x)
 
-template<bool BF16>
-__device__ void softmax_v2bf16(
+template<bool ftz>
+__device__ void softmax_bf16x2(
     uint32_t x
 ){ 
     if (ftz) {
-
-        uint64_t tmp = ((uint64_t)x) << 16;
         asm volatile(
-            "ex2.approx.ftz.bf16 %0, %1;\n\t"
-            : "=f"()
-            : "l"()
+            ".reg .b16 a, b;\n\t"
+            "mov.b32 {a, b}, %1;\n\t"
+            "ex2.approx.ftz.bf16 a, a;\n\t"
+            "ex2.approx.ftz.bf16 b, b;\n\t"
+            "mov.b32 %0, {a, b};\n\t"
+            : "=r"(x)
+            : "r"(x)
         );
     }
     else {
@@ -35,6 +37,37 @@ __device__ void softmax_v2bf16(
     }
 }
 
+
+template<bool ftz>
+__device__ void add_bf16x2x1(
+    uint32_t x, uint32_t y
+){
+    if (ftz) {
+        asm volatile(
+            "add.bf16x2 %0, %2, %1;\n\t"
+            : "=r"(y)
+            : "r"(x), "f"(y)
+        );
+    }
+    else {
+        asm volatile(
+            ".reg .b64 t, s;\n\t"
+            ".reg .b32 a, b;\n\t"
+            "and.b64 t, %1, 0x000000000000ffff;\n\t"
+            "and.b64 s, %1, 0x00000000ffff0000;\n\t"
+            "shl.b64 t, t, 16;\n\t"
+            "shl.b64 s, s, 32;\n\t"
+            "or.b64 t, t, s;\n\t"
+            "mov.b64 {a, b}, t;\n\t"
+            "add.f32 %2, a, %2;\n\t"
+            "add.f32 %2, a, %2;\n\t"
+            "cvt.rn.bf16x2.f32 %0, b, a;\n\t"
+            : "=r"(y)
+            : "r"(x), "f"(y)
+        );
+    }
+    
+}
 
 template<bool V8>
 __device__ void ldcg_b32v8(
