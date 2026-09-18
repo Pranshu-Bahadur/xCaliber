@@ -90,7 +90,7 @@ __global__ void topk_kernel(
                 topk_idx[offset] = int(0xffffu - (global_topk & 0xffffu));
             }
             else {
-                topk_weights[offset] = __nv_bfloat16((uint16_t)(global_topk & 0xffff'0000u));
+                topk_weights[offset] = (__nv_bfloat16)((uint16_t)(global_topk & 0xffff'0000u));
             }
             
         }
