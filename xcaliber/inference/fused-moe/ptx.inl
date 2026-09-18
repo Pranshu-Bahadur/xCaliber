@@ -7,10 +7,7 @@ __device__ void softmax_bf16x2( //@TODO fix
 ){ 
     if (ftz) {
         asm volatile(
-            ".reg .b16 a, b;\n\t"
-            "mov.b32 {a, b}, %1;\n\t"
-            "ex2.approx.ftz.bf16x2 a, b;\n\t"
-            "mov.b32 %0, {a, b};\n\t"
+            "ex2.approx.ftz.bf16x2 %0, %1;\n\t"
             : "=r"(x)
             : "r"(x)
         );
@@ -18,18 +15,26 @@ __device__ void softmax_bf16x2( //@TODO fix
     else {
         float y = 1.4426950408889634f;
         asm volatile( //no bf16x2 -> f32x2 cvt...
-            ".reg .b64 t, s;\n\t"
-            ".reg .b32 a, b;\n\t"
-            "and.b64 t, %1, 0x000000000000ffff;\n\t"
-            "and.b64 s, %1, 0x00000000ffff0000;\n\t"
-            "shl.b64 t, t, 4;\n\t"
-            "shl.b64 s, s, 8;\n\t"
-            "or.b64 t, t, s;\n\t"
-            "mov.b64 {a, b}, t;\n\t"
-            "fma.f32 a, a, %2, 0x0;\n\t"
-            "ex2.approx.ftz.f32 a, a;\n\t"
-            "ex2.approx.ftz.f32 b, b;\n\t"
-            "cvt.rn.bf16x2.f32 %0, b, a;\n\t"
+            ".reg .b32 w, x;\n\t"
+            ".reg .b16 a, b;\n\t"
+            "mov.b16 {a, b}, %1;\n\t"
+            
+            "mov.b32 w, {a, _};\n\t"
+            "and.b32 %1, w, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  w, w, %1;\n\t"
+
+            "mov.b32 x, {b, _};\n\t"
+            "and.b32 %1, x, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  x, x, %1;\n\t"
+
+            "mul.f32 w, w, %2;\n\t"
+            "mul.f32 x, x, %2;\n\t"
+
+            "ex2.approx.ftz.f32 w, w;\n\t"
+            "ex2.approx.ftz.f32 x, x;\n\t"
+            "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
             : "=r"(x)
             : "r"(x), "f"(y)
         );
@@ -54,13 +59,30 @@ __device__ void add_bf16x2(
             ".reg .b16 a, b, c, d;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
             "mov.b16 {c, d}, %2;\n\t"
+            
             "mov.b32 w, {a, _};\n\t"
+            "and.b32 %1, w, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  w, w, %1;\n\t"
+
             "mov.b32 x, {b, _};\n\t"
+            "and.b32 %1, x, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  x, x, %1;\n\t"
+            
             "mov.b32 y, {c, _};\n\t"
+            "and.b32 %1, y, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  y, y, %1;\n\t"
+            
             "mov.b32 z, {d, _};\n\t"
+            "and.b32 %1, z, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  z, z, %1;\n\t"
+
             "add.f32 w, w, y;\n\t"
             "add.f32 x, x, z;\n\t"
-            "cvt.rn.bf16x2.f32 %0, w, x;\n\t"
+            "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
             : "=r"(x)
             : "r"(x), "f"(y)
         );
@@ -76,11 +98,20 @@ __device__ void rcp_bf16x2(
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
+            
             "mov.b32 w, {a, _};\n\t"
+            "and.b32 %1, w, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  w, w, %1;\n\t"
+
             "mov.b32 x, {b, _};\n\t"
+            "and.b32 %1, x, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  x, x, %1;\n\t"
+
             "rcp.approx.ftz.f32 w, w;\n\t"
             "rcp.approx.ftz.f32 x, x;\n\t"
-            "cvt.rn.bf16x2.f32 %0, w, x;\n\t"
+            "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
             : "=r"(x)
             : "r"(x), "f"(y)
     );
@@ -92,11 +123,8 @@ __device__ void add_bf16x2x1(
 ){
     if (ftz) {
         asm volatile(
-            ".reg .b32 t;\n\t"
             ".reg .b16 a, b;\n\t"
-            "shl.b32 t, %2, 16;\n\t"
-            "or.b32 t, t, %2;\n\t"
-            "add.bf16x2 t, t, %1;\n\t"
+            "add.bf16x2 %1, %2, %1;\n\t"
             "mov.b32 {a, b}, t;\n\t"
             "add.bf16 t, a, b;\n\t"
             "mov.b32 %0, {t, _};\n\t"
@@ -106,17 +134,24 @@ __device__ void add_bf16x2x1(
     }
     else {
         asm volatile(
-            ".reg .b64 t, s;\n\t"
-            ".reg .b32 a, b;\n\t"
-            "and.b64 t, %1, 0x000000000000ffff;\n\t"
-            "and.b64 s, %1, 0x00000000ffff0000;\n\t"
-            "shl.b64 t, t, 16;\n\t"
-            "shl.b64 s, s, 32;\n\t"
-            "or.b64 t, t, s;\n\t"
-            "mov.b64 {a, b}, t;\n\t"
-            "add.f32 %2, a, %2;\n\t"
-            "add.f32 %2, b, %2;\n\t"
-            "cvt.rn.bf16x2.f32 %0, b, a;\n\t"
+            ".reg .b32 w, x;\n\t"
+            ".reg .b16 a, b;\n\t"
+            "mov.b16 {a, b}, %1;\n\t"
+            
+            "mov.b32 w, {a, _};\n\t"
+            "and.b32 %1, w, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  w, w, %1;\n\t"
+
+            "mov.b32 x, {b, _};\n\t"
+            "and.b32 %1, x, 0x00001000;\n\t"
+            "shl.b32 %1, %1, 16;\n\t"
+            "or.b32  x, x, %1;\n\t"
+
+            "add.f32 x, w, x;\n\t"
+            "add.f32 x, x, %2;\n\t"
+            "cvt.rn.bf16.f32 a, x;\n\t"
+            "mov.b32 %0, {a, _}"
             : "=r"(y)
             : "r"(x), "f"(y)
         );
