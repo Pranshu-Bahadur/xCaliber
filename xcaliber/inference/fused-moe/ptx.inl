@@ -37,14 +37,20 @@ __device__ void softmax_bf16x2(
     }
 }
 
-
 template<bool ftz>
 __device__ void add_bf16x2x1(
     uint32_t x, uint32_t y
 ){
     if (ftz) {
         asm volatile(
-            "add.bf16x2 %0, %2, %1;\n\t"
+            ".reg .b32 t;\n\t"
+            ".reg .b16 a, b;\n\t"
+            "shl.b32 t, %2, 16;\n\t"
+            "or.b32 t, t, %2;\n\t"
+            "add.bf16x2 t, t, %1;\n\t"
+            "mov.b32 {a, b}, t;\n\t"
+            "add.bf16 t, a, b;\n\t"
+            "mov.b32 %0, {t, _};\n\t"
             : "=r"(y)
             : "r"(x), "f"(y)
         );
@@ -60,13 +66,12 @@ __device__ void add_bf16x2x1(
             "or.b64 t, t, s;\n\t"
             "mov.b64 {a, b}, t;\n\t"
             "add.f32 %2, a, %2;\n\t"
-            "add.f32 %2, a, %2;\n\t"
+            "add.f32 %2, b, %2;\n\t"
             "cvt.rn.bf16x2.f32 %0, b, a;\n\t"
             : "=r"(y)
             : "r"(x), "f"(y)
         );
     }
-    
 }
 
 template<bool V8>

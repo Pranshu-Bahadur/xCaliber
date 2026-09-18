@@ -16,6 +16,10 @@ __global__ void topk_kernel(
                     rmem[j] = softmax_bf16x2(rmem[j]);
                     rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
                 }
+                else {
+                    rmem[j] = softmax_bf16x2(rmem[j] ^ 0x10001000u);
+                    //@TODO hadd2
+                }
             }
         }
     }
