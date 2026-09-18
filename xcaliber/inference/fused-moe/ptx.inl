@@ -34,7 +34,7 @@ template<bool SM90P>
 __device__ void add_bf16x2(
     uint32_t x, uint32_t y
 ){
-    if (ftz) {
+    if (SM90P) {
         asm volatile(
             "add.bf16x2 %0, %0, %1;\n\t"
             : "=r"(x)
