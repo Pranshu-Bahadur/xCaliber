@@ -1,20 +1,20 @@
-
+//imports
 #define f322b(x) __float_as_uint(x)
 
-template<bool ftz>
-__device__ void softmax_bf16x2( //@TODO fix
+template<bool SM90P>
+__device__ void softmax_bf16x2(
     uint32_t x
 ){ 
-    if (ftz) {
+    if (SM90P) {
         asm volatile(
             "ex2.approx.ftz.bf16x2 %0, %1;\n\t"
             : "=r"(x)
             : "r"(x)
         );
-    }
-    else {
+    } //SM80, SM89
+    else { 
         float y = 1.4426950408889634f;
-        asm volatile( //no bf16x2 -> f32x2 cvt...
+        asm volatile(
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
@@ -39,7 +39,7 @@ __device__ void softmax_bf16x2( //@TODO fix
     }
 }
 
-template<bool ftz>
+template<bool SM90P>
 __device__ void add_bf16x2(
     uint32_t x, uint32_t y
 ){
@@ -56,31 +56,26 @@ __device__ void add_bf16x2(
             ".reg .b16 a, b, c, d;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
             "mov.b16 {c, d}, %2;\n\t"
-            
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
             "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
-
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
             "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
-            
             "mov.b32 y, {c, _};\n\t"
             "and.b32 %1, y, 0x00001000;\n\t"
             "and.b32 y, y, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  y, y, %1;\n\t"
-            
             "mov.b32 z, {d, _};\n\t"
             "and.b32 %1, z, 0x00001000;\n\t"
             "and.b32 z, z, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  z, z, %1;\n\t"
-
             "add.f32 w, w, y;\n\t"
             "add.f32 x, x, z;\n\t"
             "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
@@ -90,7 +85,6 @@ __device__ void add_bf16x2(
     }
 }
 
-template<bool ftz>
 __device__ void rcp_bf16x2(
     uint32_t x
 ){
@@ -119,11 +113,11 @@ __device__ void rcp_bf16x2(
     );
 }
 
-template<bool ftz>
+template<bool SM90P>
 __device__ void add_bf16x2x1(
     uint32_t x, uint32_t y
 ){
-    if (ftz) {
+    if (SM90P) {
         asm volatile(
             ".reg .b16 a, b;\n\t"
             "add.bf16x2 %1, %2, %1;\n\t"
@@ -139,19 +133,16 @@ __device__ void add_bf16x2x1(
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
-            
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
             "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
-
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
             "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
-
             "add.f32 x, w, x;\n\t"
             "add.f32 x, x, %2;\n\t"
             "cvt.rn.bf16.f32 a, x;\n\t"
@@ -162,7 +153,6 @@ __device__ void add_bf16x2x1(
     }
 }
 
-template<bool V8>
 __device__ void ldcg_b32v4(
     const uint32_t* src,
     uint32_t* dst
@@ -174,12 +164,12 @@ __device__ void ldcg_b32v4(
         );
 }
 
-template<bool V8>
+template<bool SM100P>
 __device__ void ldcg_b32v8(
     const uint32_t* src,
     uint32_t* dst
 ){
-    if (V8) {
+    if (SM100P) {
         asm volatile(
             "ld.aquire.global.gpu.cg.L2::256B.v8.b32 {%0, %1, %2, %3, %4, %5, %6, %7}, [%8];\n\t"
             : "=r"(dst[i]), "=r"(dst[i + 1]), "=r"(dst[i + 2]), "=r"(dst[i + 3]), 
