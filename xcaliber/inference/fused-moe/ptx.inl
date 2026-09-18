@@ -2,15 +2,14 @@
 #define f322b(x) __float_as_uint(x)
 
 template<bool ftz>
-__device__ void softmax_bf16x2(
+__device__ void softmax_bf16x2( //@TODO fix
     uint32_t x
 ){ 
     if (ftz) {
         asm volatile(
             ".reg .b16 a, b;\n\t"
             "mov.b32 {a, b}, %1;\n\t"
-            "ex2.approx.ftz.bf16 a, a;\n\t"
-            "ex2.approx.ftz.bf16 b, b;\n\t"
+            "ex2.approx.ftz.bf16x2 a, b;\n\t"
             "mov.b32 %0, {a, b};\n\t"
             : "=r"(x)
             : "r"(x)
@@ -23,8 +22,8 @@ __device__ void softmax_bf16x2(
             ".reg .b32 a, b;\n\t"
             "and.b64 t, %1, 0x000000000000ffff;\n\t"
             "and.b64 s, %1, 0x00000000ffff0000;\n\t"
-            "shl.b64 t, t, 16;\n\t"
-            "shl.b64 s, s, 32;\n\t"
+            "shl.b64 t, t, 4;\n\t"
+            "shl.b64 s, s, 8;\n\t"
             "or.b64 t, t, s;\n\t"
             "mov.b64 {a, b}, t;\n\t"
             "fma.f32 a, a, %2, 0x0;\n\t"
@@ -35,6 +34,56 @@ __device__ void softmax_bf16x2(
             : "r"(x), "f"(y)
         );
     }
+}
+
+
+template<bool ftz>
+__device__ void add_bf16x2(
+    uint32_t x, uint32_t y
+){
+    if (ftz) {
+        asm volatile(
+            "add.bf16x2 %0, %0, %1;\n\t"
+            : "=r"(x)
+            : "r"(x), "f"(y)
+        );
+    }
+    else {
+        asm volatile(
+            ".reg .b32 w, x, y, z;\n\t"
+            ".reg .b16 a, b, c, d;\n\t"
+            "mov.b16 {a, b}, %1;\n\t"
+            "mov.b16 {c, d}, %2;\n\t"
+            "mov.b32 w, {a, _};\n\t"
+            "mov.b32 x, {b, _};\n\t"
+            "mov.b32 y, {c, _};\n\t"
+            "mov.b32 z, {d, _};\n\t"
+            "add.f32 w, w, y;\n\t"
+            "add.f32 x, x, z;\n\t"
+            "cvt.rn.bf16x2.f32 %0, w, x;\n\t"
+            : "=r"(x)
+            : "r"(x), "f"(y)
+        );
+    }
+}
+
+
+template<bool ftz>
+__device__ void rcp_bf16x2(
+    uint32_t x
+){
+    asm volatile(
+            ".reg .b32 w, x;\n\t"
+            ".reg .b16 a, b;\n\t"
+            "mov.b16 {a, b}, %1;\n\t"
+            "mov.b32 w, {a, _};\n\t"
+            "mov.b32 x, {b, _};\n\t"
+            "rcp.approx.ftz.f32 w, w;\n\t"
+            "rcp.approx.ftz.f32 x, x;\n\t"
+            "cvt.rn.bf16x2.f32 %0, w, x;\n\t"
+            : "=r"(x)
+            : "r"(x), "f"(y)
+    );
 }
 
 template<bool ftz>
