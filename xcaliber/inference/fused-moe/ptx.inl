@@ -1,9 +1,10 @@
 //imports
 #define f322b(x) __float_as_uint(x)
+#define u162bf16(x) __ushort_as_bfloat16(x)
 
-template<bool SM90P>
+template<bool negate>
 __device__ void softmax_bf16x2(
-    uint32_t x
+    __nv_bfloat162 x
 ){ 
     float y = 1.4426950408889634f;
     asm volatile(
@@ -32,7 +33,7 @@ __device__ void softmax_bf16x2(
 
 template<bool SM90P>
 __device__ void add_bf16x2(
-    uint32_t x, uint32_t y
+    __nv_bfloat162 x, __nv_bfloat162 y
 ){
     if (SM90P) {
         asm volatile(
@@ -77,7 +78,7 @@ __device__ void add_bf16x2(
 }
 
 __device__ void rcp_bf16x2(
-    uint32_t x
+    __nv_bfloat162 x
 ){
     asm volatile(
             ".reg .b32 w, x;\n\t"
@@ -103,7 +104,7 @@ __device__ void rcp_bf16x2(
 
 template<bool SM90P>
 __device__ void add_bf16x2x1(
-    uint32_t x, uint32_t y
+    __nv_bfloat162 x, __nv_bfloat162 y
 ){
     if (SM90P) {
         asm volatile(
@@ -142,7 +143,7 @@ __device__ void add_bf16x2x1(
 }
 
 __device__ void ldcg_b32v4(
-    const uint32_t* src,
+    const uint64_t* src,
     uint32_t* dst
 ){
     asm volatile(
@@ -154,7 +155,7 @@ __device__ void ldcg_b32v4(
 
 template<bool SM100P>
 __device__ void ldcg_b32v8(
-    const uint32_t* src,
+    const uint64_t* src,
     uint32_t* dst
 ){
     if (SM100P) {
