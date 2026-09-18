@@ -6,7 +6,7 @@ __device__ void softmax_bf16x2(
     uint32_t x
 ){ 
     if (SM90P) {
-        asm volatile(
+        asm volatile( //@TODO add mul
             "ex2.approx.ftz.bf16x2 %0, %1;\n\t"
             : "=r"(x)
             : "r"(x)

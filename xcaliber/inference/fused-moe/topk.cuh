@@ -13,14 +13,15 @@ __global__ void topk_kernel(
     for (int i = 0; i < (E >> 10); i++) { //the 10 needs to be mutable
         int KP = (int)((K + 1)/2);
         if (i) { // mutable ^
-            for (int j = (i-4); j < 4 && (i-4) < KP; j++) { //the 4 needs to be mutable
+            for (int j = ((i-1) << 2); j < 4 && ((i-1) << 2) < KP; j++) {
                 if (softmax) {
                     rmem[j] = softmax_bf16x2(rmem[j]);
+                    if (!j) rmem[31] = 0u;
                     rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
                 }
                 else {
                     rmem[j] = softmax_bf16x2(rmem[j] ^ 0x10001000u);
-                    rmem[j] = add_bf16x2(rmem[j], make_uint2(0x1u, 0x1u));
+                    rmem[j] = add_bf16x2(rmem[j], make_uint2(0x0000'0001u, 0x0000'0001u));
                     rmem[j] = rcp_bf16x2(rmem[j]);
                 }
                 if (rmem[j] && j < K/2) {
