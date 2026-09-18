@@ -102,7 +102,6 @@ __global__ void topk_kernel(
             else {
                 topk_weights[offset] = (__nv_bfloat16)((uint16_t)(global_topk & 0xffff'0000u));
             }
-            
         }
     }
 }
