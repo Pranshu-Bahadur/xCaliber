@@ -11,7 +11,7 @@ __global__ void topk_kernel(
     uint32_t rmem[32];
     for (int i = 0; i < (E >> 10); i++) { //the 10 needs to be mutable
         if (i) {
-            for (int j = i-4; j < 4 && i < K; j++) { //the 4 needs to be mutable
+            for (int j = (i-4); j < 4 && (i-4) < (K/2); j++) { //the 4 needs to be mutable
                 if (softmax) {
                     rmem[j] = softmax_bf16x2(rmem[j]);
                     rmem[31] = add_bf16x2x1(rmem[j], rmem[31]);
@@ -21,10 +21,20 @@ __global__ void topk_kernel(
                     rmem[j] = add_bf16x2(rmem[j], make_uint2(0x1u, 0x1u));
                     rmem[j] = rcp_bf16x2(rmem[j]);
                 }
-                if (rmem[j]) {
+                if (rmem[j] && j < K/2) {
 
                 }
             }
         }
+        ldcg_b32v4(
+            (uint64_t)__cvta_generic_to_global(
+                (uint64_t)(
+                    router_logits
+                    + (((blockIdx.x << 3) + (threadIdx.x)) * E)
+                    + (threadIdx.y << 2) + (i << 6)
+                )
+            ),
+            rmem[i << 2]
+        );
     }
 }

@@ -18,22 +18,18 @@ __device__ void softmax_bf16x2( //@TODO fix
             ".reg .b32 w, x;\n\t"
             ".reg .b16 a, b;\n\t"
             "mov.b16 {a, b}, %1;\n\t"
-            
             "mov.b32 w, {a, _};\n\t"
             "and.b32 %1, w, 0x00001000;\n\t"
             "and.b32 w, w, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  w, w, %1;\n\t"
-
             "mov.b32 x, {b, _};\n\t"
             "and.b32 %1, x, 0x00001000;\n\t"
             "and.b32 x, x, 0x00007fff;\n\t"
             "shl.b32 %1, %1, 16;\n\t"
             "or.b32  x, x, %1;\n\t"
-
             "mul.f32 w, w, %2;\n\t"
             "mul.f32 x, x, %2;\n\t"
-
             "ex2.approx.ftz.f32 w, w;\n\t"
             "ex2.approx.ftz.f32 x, x;\n\t"
             "cvt.rn.bf16x2.f32 %0, x, w;\n\t"
@@ -42,7 +38,6 @@ __device__ void softmax_bf16x2( //@TODO fix
         );
     }
 }
-
 
 template<bool ftz>
 __device__ void add_bf16x2(
@@ -94,7 +89,6 @@ __device__ void add_bf16x2(
         );
     }
 }
-
 
 template<bool ftz>
 __device__ void rcp_bf16x2(
@@ -166,6 +160,18 @@ __device__ void add_bf16x2x1(
             : "r"(x), "f"(y)
         );
     }
+}
+
+template<bool V8>
+__device__ void ldcg_b32v4(
+    const uint32_t* src,
+    uint32_t* dst
+){
+    asm volatile(
+            "ld.global.cg.L2::128B.v4.b32 {%0, %1, %2, %3}, [%8];\n\t"
+            : "=r"(dst[i]), "=r"(dst[i + 1]), "=r"(dst[i + 2]), "=r"(dst[i + 3])
+            : "l"((uint64_t)__cvta_generic_to_global(src))
+        );
 }
 
 template<bool V8>
