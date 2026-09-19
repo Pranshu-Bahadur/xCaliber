@@ -1,4 +1,7 @@
 #include <ATen/ATen.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAException.h>
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
 #include <cstdint>
@@ -7,6 +10,7 @@
 #include <cfloat>
 #include <cooperative_groups.h>
 #include <type_traits>
+#include "topk.cuh"
 namespace cg = cooperative_groups;
 /*
 
@@ -164,12 +168,50 @@ void topk(
     const int64_t K,
     bool softmax
 ) {
+    TORCH_CHECK(router_logits.is_cuda() && topk_idx.device() == router_logits.device()
+                && topk_weights.device() == router_logits.device(), "topk requires tensors on the same CUDA device");
+    TORCH_CHECK(router_logits.dim() == 2 && router_logits.is_contiguous()
+                && topk_idx.is_contiguous() && topk_weights.is_contiguous(), "topk requires contiguous tensors and 2D logits");
+    TORCH_CHECK(router_logits.scalar_type() == at::kBFloat16 || router_logits.scalar_type() == at::kFloat,
+                "topk logits must be BF16 or FP32");
+    TORCH_CHECK(topk_idx.scalar_type() == at::kInt && topk_weights.scalar_type() == at::kBFloat16,
+                "topk outputs must be int32 indices and BF16 weights");
     const int N = router_logits.size(0);
     const int E = router_logits.size(1);
+    TORCH_CHECK(K > 0 && K <= 16 && K <= E && E <= 1024 && !(E & 7),
+                "topk requires 1 <= K <= min(16, E), E <= 1024, E % 8 == 0");
+    TORCH_CHECK(topk_idx.dim() == 2 && topk_idx.size(0) == N && topk_idx.size(1) == K
+                && topk_weights.sizes() == topk_idx.sizes(), "topk outputs must have shape [N, K]");
+    TORCH_CHECK(!(reinterpret_cast<uintptr_t>(router_logits.data_ptr()) & 15), "topk logits must be 16-byte aligned");
+    TORCH_CHECK(router_logits.scalar_type() == at::kBFloat16 || (!(N & 7) && !(E & 255) && K <= E / 32),
+                "FP32 topk requires N % 8 == 0, E % 256 == 0, K <= E / 32");
+    if (!N) return;
+    c10::cuda::CUDAGuard guard(router_logits.device());
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
     dim3 block(8, 4, 8);
     dim3 grid((int)(N + 7) / 8);
+    if (router_logits.scalar_type() == at::kBFloat16) {
+        if (softmax) {
+            topk_kernel<true><<<grid, block, 0, stream>>>(
+                reinterpret_cast<const __nv_bfloat16*>(router_logits.data_ptr<at::BFloat16>()),
+                topk_idx.data_ptr<int>(),
+                reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
+                static_cast<int>(K), N, E
+            );
+        }
+        else {
+            topk_kernel<false><<<grid, block, 0, stream>>>(
+                reinterpret_cast<const __nv_bfloat16*>(router_logits.data_ptr<at::BFloat16>()),
+                topk_idx.data_ptr<int>(),
+                reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
+                static_cast<int>(K), N, E
+            );
+        }
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        return;
+    }
     if (softmax) {
-        topk_kernel<float, true><<<grid, block, 0, 0>>>(
+        topk_kernel<float, true><<<grid, block, 0, stream>>>(
             router_logits.data_ptr<float>(),
             topk_idx.data_ptr<int>(),
             reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
@@ -179,7 +221,7 @@ void topk(
         );
     }
     else {
-        topk_kernel<float, false><<<grid, block, 0, 0>>>(
+        topk_kernel<float, false><<<grid, block, 0, stream>>>(
             router_logits.data_ptr<float>(),
             topk_idx.data_ptr<int>(),
             reinterpret_cast<__nv_bfloat16*>(topk_weights.data_ptr<at::BFloat16>()),
@@ -188,4 +230,5 @@ void topk(
             E
         );
     }
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }

@@ -15,6 +15,7 @@ setup(
         CUDAExtension(
             name="xcalibur",
             sources=[str(s) for s in sources],
+            depends=[str(ROOT / "inference" / "fused-moe" / s) for s in ("topk.cuh", "ptx.inl")],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
                 "nvcc": [
