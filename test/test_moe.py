@@ -97,21 +97,35 @@ def check(N, E, K, softmax, repeat=0, pattern="random"):
     return rows
 
 
-def benchmark(Ns=(8, 16, 16384), Es=(256, 512), Ks=(2, 8), repeat=100):
+def benchmark(Ns=(8, 16, 16384), Es=(256, 512), Ks=(2, 8), repeat=100, verbose=True):
     assert torch.cuda.is_available() and repeat > 0
-    print(f"GPU: {torch.cuda.get_device_name()} | Torch {torch.__version__} | CUDA {torch.version.cuda}")
-    print("     N     E   K activation variant        us   xTorch overlap%     max_abs  max_rel%    mass_gap")
+    if verbose:
+        print(f"GPU: {torch.cuda.get_device_name()} | Torch {torch.__version__} | CUDA {torch.version.cuda}")
+        print("Speedup = baseline / BF16; >1 means BF16 is faster. '-' means unsupported.")
     rows = []
     for softmax in (False, True):
+        if verbose:
+            print(f"\n{'Softmax' if softmax else 'Sigmoid'} | latency in us")
+            print("Tokens Experts   K      BF16  Old FP32     Torch  vs FP32 vs Torch")
         for N in Ns:
             for E in Es:
                 for K in Ks:
                     result = check(N, E, K, softmax, repeat)
                     rows.extend(result)
-                    for r in result:
-                        print(f"{N:6} {E:5} {K:3} {r['activation']:>10} {r['variant']:>7} {r['us']:9.3f}"
-                              f" {r['speedup']:8.2f} {r['overlap_pct']:8.3f} {r['max_abs']:11.3e}"
-                              f" {r['max_rel_pct']:9.3f} {r['mass_gap']:11.3e}")
+                    if verbose:
+                        bf16, baseline = result[0], result[-1]
+                        fp32 = next((r for r in result if r["variant"] == "fp32"), None)
+                        old_us = f"{fp32['us']:.3f}" if fp32 else "-"
+                        old_speedup = f"{fp32['us'] / bf16['us']:.2f}x" if fp32 else "-"
+                        print(f"{N:6} {E:7} {K:3} {bf16['us']:9.3f} {old_us:>9} {baseline['us']:9.3f}"
+                              f" {old_speedup:>8} {baseline['us'] / bf16['us']:7.2f}x")
+        if verbose:
+            print("\nBF16 accuracy vs Torch | weight error is the maximum relative error")
+            print("Tokens Experts   K  Expert overlap   Weight error   Score loss")
+            for r in rows:
+                if r["variant"] == "bf16" and r["activation"] == ("softmax" if softmax else "sigmoid"):
+                    print(f"{r['N']:6} {r['E']:7} {r['K']:3} {r['overlap_pct']:14.3f}%"
+                          f" {r['max_rel_pct']:13.3f}% {r['mass_gap']:12.3e}")
     return rows
 
 
